@@ -426,14 +426,18 @@ void O3_CPU::read_from_trace()
                         if(arch_instr.branch_type == BRANCH_CONDITIONAL)
                         record[cpu][i].branch_type = 1;
                         int32_t branch_delta_value = arch_instr.ip - last_target_address[cpu];
-                        record[cpu][i].target_delta = IFETCH_BUFFER.entry[ifetch_buffer_index].branch_target - arch_instr.ip;   
+                        int32_t target_delta_value = IFETCH_BUFFER.entry[ifetch_buffer_index].branch_target - arch_instr.ip;  
+
                         if (branch_delta_value > (1 << 8)) {
                             record[cpu][i].entry_format = 1; 
                             record[cpu][i].full_addr = arch_instr.ip; 
-                        }     
+                        } else{
+                            record[cpu][i].branch_delta = static_cast<uint8_t>(branch_delta_value);
+                        }   
                     }
 
                     last_target_address[cpu] = IFETCH_BUFFER.entry[ifetch_buffer_index].branch_target; 
+
 					uint32_t btb_set = BTB.get_set(arch_instr.ip >> 2);
 					int btb_way = BTB.get_way(arch_instr.ip, btb_set);
 					if(btb_way == BTB_WAY)
