@@ -49,9 +49,9 @@
 
 
 #ifdef DEBUG_PRINT
-//#define DP(x) x //@Vishal: Use this to print only in simulation
+#define DP(x) x //@Vishal: Use this to print only in simulation
 
-#define DP(x) {int temp=warmup_complete[0];warmup_complete[0]=1;x;warmup_complete[0]=temp;} //@Vishal: Use this to print in warmup+simulation
+//#define DP(x) {int temp=warmup_complete[0];warmup_complete[0]=1;x;warmup_complete[0]=temp;} //@Vishal: Use this to print in warmup+simulation
 
 #else
 #define DP(x)

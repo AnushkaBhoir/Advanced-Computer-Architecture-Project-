@@ -1,0 +1,138 @@
+#include "cache.h"
+
+// ------------------------- DO NOT CHANGE -------------------------------- //
+#define IP_TRACKER_COUNT 64           // Number of IP trackers
+#define PREFETCH_DEGREE 5             // Prefetch degree
+// ------------------------- DO NOT CHANGE -------------------------------- //
+
+class IP_TRACKER {
+public:
+    uint64_t ip = 0;           // the IP we're tracking
+    uint64_t last_cl_addr = 0; // the last address accessed by this IP
+    int64_t stride = 0;   // the stride between the last two addresses accessed by this IP
+    int degree = 0;  
+    int lru = 0;
+
+    void update_tracker(uint64_t curr_ip, uint64_t new_addr){
+        if (curr_ip == ip){
+            int64_t str = new_addr - last_cl_addr;
+            if(str == stride && stride != 0){
+                degree = PREFETCH_DEGREE;
+            }else{
+                stride = str;
+                degree = 0;
+            }
+            last_cl_addr = new_addr;
+        }
+    }
+
+    // Get the next prefetch address if possible
+    bool get_next_prefetch(uint64_t& pf_address, int& i) {
+        if (degree > 0 && stride != 0) {
+            degree--;
+            pf_address = last_cl_addr + i * stride;  // return next cache-line address
+            return true; // Prefetch address is valid
+        }
+        return false; // No more prefetches
+    }
+};
+
+IP_TRACKER trackers[IP_TRACKER_COUNT];
+
+// ------------------------- Initialize the prefetcher ------------------------- // 
+void CACHE::l1d_prefetcher_initialize() 
+{
+    cout << "CPU " << cpu << " L1D IP-based stride prefetcher" << endl;
+}
+
+// --------------- This is the main prefetcher operate function ---------------- // 
+void CACHE::l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint8_t critical_ip_flag)
+{
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE; // gives us cacheline address from byte address
+    IP_TRACKER* tracker = nullptr;
+   // cout<<"Checking what is cache_hit "<< unsigned(cache_hit) <<endl;
+    // Initialize variables to track the LRU entry
+    int mini_lru = INT_MAX; 
+    int lru_index = -1; 
+
+    // Search for the tracker for the current IP
+    for (int i = 0; i < IP_TRACKER_COUNT; i++) {
+        if (trackers[i].ip == ip) {
+            tracker = &trackers[i];
+            break;
+        }
+    }
+
+    // If no tracker was found, look for an empty slot or the LRU entry
+    if (!tracker) {
+        bool flag = false;
+        for (int i = 0; i < IP_TRACKER_COUNT; i++) {
+            if (trackers[i].ip == 0) {
+                flag = true;
+
+                trackers[i].ip = ip;
+                trackers[i].last_cl_addr = cl_addr;
+                trackers[i].stride = 0; // Initial stride is 0
+                trackers[i].degree = 0; // Initial degree is 0
+                tracker = &trackers[i];
+                break;
+            } else {
+                // Update LRU tracking
+                if(trackers[i].lru < mini_lru){
+                    mini_lru = trackers[i].lru;
+                    lru_index = i;
+                }
+            }
+        }
+        // If no empty slots, evict the LRU entry
+        if (!flag) {
+            trackers[lru_index].ip = ip;
+            trackers[lru_index].last_cl_addr = cl_addr;
+            trackers[lru_index].stride = 0; // Initial stride is 0
+            trackers[lru_index].degree = 0; // Initial degree is 0
+            tracker = &trackers[lru_index];
+        }
+    }
+
+    // Update the tracker if found or newly assigned
+    if (tracker) {
+        tracker->update_tracker(ip, cl_addr);
+        uint64_t pf_address;
+        int i = 1;
+
+        // Get the next prefetch address
+        while(tracker->get_next_prefetch(pf_address, i)) {
+            // Ensure prefetch address is within the same page
+            if ((pf_address >> LOG2_PAGE_SIZE) == (cl_addr >> LOG2_PAGE_SIZE)) {
+                // Convert cache-line address back to full address
+                pf_address = pf_address << LOG2_BLOCK_SIZE;
+                prefetch_line(ip, addr, pf_address, FILL_L1, 0);
+            }
+        }
+
+        // Update the LRU counter for the current tracker
+        tracker->lru = 0;
+
+        // Increment LRU counter for all other trackers
+        for (int j = 0; j < IP_TRACKER_COUNT; j++) {
+            if (&trackers[j] != tracker) {
+                trackers[j].lru++;
+            }
+        }
+    }
+
+    return;
+}
+
+// ------------------------- DO NOT CHANGE -------------------------------- //
+void CACHE::l1d_prefetcher_cache_fill(uint64_t v_addr, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t v_evicted_addr, uint64_t evicted_addr, uint32_t metadata_in)
+{
+    return;
+}
+
+void CACHE::l1d_prefetcher_final_stats()
+{
+    cout << "CPU " << cpu << " L1D IP-based stride prefetcher final stats" << endl;
+    cout << "Degree: " << PREFETCH_DEGREE << endl;
+}
+// ------------------------- DO NOT CHANGE -------------------------------- //

@@ -1,0 +1,154 @@
+#include "cache.h"
+
+// ------------------------- DO NOT CHANGE -------------------------------- //
+#define NUM_IP_TABLE_ENTRIES 1024           // IP table entries
+#define PREFETCH_DEGREE 5                   // Prefetch degree
+// ------------------------- DO NOT CHANGE -------------------------------- //
+
+// ------------ YOU CAN CHANGE THE IP_TABLE FOR YOUR DESIGN ---------------- //
+class IP_TABLE {
+public:
+    uint64_t ip;
+    uint64_t last_addr; // last cl offset in the 4KB page
+    uint16_t signature; // CPLX signature
+    int lru_counter; // Counter for LRU tracking
+
+    IP_TABLE() {
+        ip = 0;
+        last_addr = 0;
+        signature = 0;
+        lru_counter = 0; // Initialize LRU counter
+    };
+};
+
+class CSPT {
+public:
+    uint16_t predicted_stride;
+    int conf;
+
+    CSPT() {
+        predicted_stride = 0;
+        conf = 0;
+    }
+};
+
+IP_TABLE trackers_cplx[NUM_IP_TABLE_ENTRIES];
+CSPT trackers_cspt[NUM_IP_TABLE_ENTRIES];
+
+// ------------------------- Updating the signature ---------------------------- // 
+uint16_t update_sig_l1(uint16_t old_sig, int delta) {
+    old_sig = (old_sig << 1) ^ delta;
+    old_sig = old_sig & 1023;
+    return old_sig;
+}
+
+// ------------------- Updating confidence for the CPLX class ------------------ // 
+int update_conf(int stride, int pred_stride, int conf) {
+    if (stride == pred_stride) {
+        conf++;
+    } else {
+        if (conf > 0) {
+            conf--;
+        } 
+    }
+    return conf;
+}
+
+// ------------------------- Initialize the prefetcher ------------------------- // 
+void CACHE::l1d_prefetcher_initialize() 
+{
+    cout << "CPU " << cpu << " L1D Complex-Stride prefetcher" << endl;
+
+    for (uint16_t i = 0; i < NUM_IP_TABLE_ENTRIES; i++) {
+        trackers_cspt[i].predicted_stride = i + 1;
+    }
+}
+
+// --------------- This is the main prefetcher operate function ---------------- // 
+void CACHE::l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint8_t critical_ip_flag)
+{
+    uint64_t cl_addr = addr >> LOG2_BLOCK_SIZE;
+
+    // --------------------- Add Complex-Stride pf_address logic here --------------------- // 
+    IP_TABLE* tracker = nullptr;
+    int lru_index = -1;
+    int min_lru = INT32_MAX; // To track the least recently used entry
+
+    // Search for the IP in the tracker
+    for (int i = 0; i < NUM_IP_TABLE_ENTRIES; i++) {
+        if (trackers_cplx[i].ip == ip) {
+            tracker = &trackers_cplx[i];
+            break;
+        }
+    }
+
+    // If the tracker is not found, look for an empty slot or determine the LRU entry
+    if (!tracker) {
+        for (int i = 0; i < NUM_IP_TABLE_ENTRIES; i++) {
+            if (trackers_cplx[i].ip == 0) {
+                tracker = &trackers_cplx[i];
+                break;
+            }
+            // Update LRU tracking
+            if (trackers_cplx[i].lru_counter < min_lru) {
+                min_lru = trackers_cplx[i].lru_counter;
+                lru_index = i;
+            }
+        }
+        // If no empty slots, evict the LRU entry
+        if (!tracker) {
+            tracker = &trackers_cplx[lru_index];
+            tracker->ip = ip;
+            tracker->last_addr = cl_addr;
+            tracker->signature = 0;
+        }
+    } else {
+        uint16_t delta = cl_addr - tracker->last_addr;
+        int pred_stride = trackers_cspt[tracker->signature].predicted_stride;
+        int val = update_conf(delta, pred_stride, trackers_cspt[tracker->signature].conf);
+        if(val == trackers_cspt[tracker->signature].conf){
+           trackers_cspt[tracker->signature].predicted_stride = delta;
+        } else{
+            trackers_cspt[tracker->signature].conf = val;
+        }
+
+        if (trackers_cspt[tracker->signature].conf >= 1) {
+            for (int i = 1; i <= PREFETCH_DEGREE; i++) {
+                uint64_t pf_address = (cl_addr + delta * i) << LOG2_BLOCK_SIZE;
+                prefetch_line(ip, addr, pf_address, FILL_L1, 0);
+            }
+        }
+
+        tracker->signature = update_sig_l1(tracker->signature, delta);
+    }
+
+    // Update the last address and LRU counter
+    tracker->last_addr = cl_addr;
+    tracker->ip = ip;
+    tracker->lru_counter = 0; // Reset this entry's LRU counter
+
+    // Increment the LRU counter for all other entries
+    for (int i = 0; i < NUM_IP_TABLE_ENTRIES; i++) {
+        if (&trackers_cplx[i] != tracker) {
+            trackers_cplx[i].lru_counter++;
+        }
+    }
+
+    return;
+}
+
+// ------------------------- DO NOT CHANGE -------------------------------- //
+void CACHE::l1d_prefetcher_notify_about_dtlb_eviction(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in)
+{
+}
+
+void CACHE::l1d_prefetcher_cache_fill(uint64_t v_addr, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t v_evicted_addr, uint64_t evicted_addr, uint32_t metadata_in)
+{
+}
+
+void CACHE::l1d_prefetcher_final_stats()
+{
+    cout << "CPU " << cpu << " L1D complex stride prefetcher final stats" << endl;
+    cout << "Degree: " << PREFETCH_DEGREE << endl;
+}
+// ------------------------- DO NOT CHANGE -------------------------------- //

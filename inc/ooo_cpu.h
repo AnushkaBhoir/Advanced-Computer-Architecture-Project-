@@ -1,472 +1,255 @@
-/*
- *    Copyright 2023 The ChampSim Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#ifdef CHAMPSIM_MODULE
-#define SET_ASIDE_CHAMPSIM_MODULE
-#undef CHAMPSIM_MODULE
-#endif
-
 #ifndef OOO_CPU_H
 #define OOO_CPU_H
 
-#include <array>
-#include <bitset>
-#include <deque>
-#include <limits>
-#include <memory>
-#include <optional>
-#include <queue>
-#include <stdexcept>
-#include <vector>
+#include "cache.h"
+#include "page_table_walker.h"
 
-#include "champsim.h"
-#include "champsim_constants.h"
-#include "channel.h"
-#include "instruction.h"
-#include "module_impl.h"
-#include "operable.h"
-#include "util/lru_table.h"
-#include <type_traits>
+#ifdef CRC2_COMPILE
+#define STAT_PRINTING_PERIOD 1000000
+#else
+#define STAT_PRINTING_PERIOD 10000000
+#endif
+#define DEADLOCK_CYCLE 1000000
 
-enum STATUS { INFLIGHT = 1, COMPLETED = 2 };
+using namespace std;
 
-class CACHE;
-class CacheBus
-{
-  using channel_type = champsim::channel;
-  using request_type = typename channel_type::request_type;
-  using response_type = typename channel_type::response_type;
+// CORE PROCESSOR
+#define FETCH_WIDTH 6
+#define DECODE_WIDTH 6
+#define EXEC_WIDTH 6
+#define LQ_WIDTH 2
+#define SQ_WIDTH 2
+#define RETIRE_WIDTH 4
+#define SCHEDULER_SIZE 128
+#define BRANCH_MISPREDICT_PENALTY 1 //@Vishal: Updated from 20 to be same as new ChampSim, anyway penalty is simulated because of queues
+//#define SCHEDULING_LATENCY 6
+//#define EXEC_LATENCY 1
 
-  channel_type* lower_level;
-  uint32_t cpu;
+#define STA_SIZE (ROB_SIZE*NUM_INSTR_DESTINATIONS_SPARC)
 
-  friend class O3_CPU;
+#define BTB_SET 1024
+#define BTB_WAY 4
 
-public:
-  CacheBus(uint32_t cpu_idx, champsim::channel* ll) : lower_level(ll), cpu(cpu_idx) {}
-  bool issue_read(request_type packet);
-  bool issue_write(request_type packet);
-};
+extern uint32_t SCHEDULING_LATENCY, EXEC_LATENCY, DECODE_LATENCY;
+extern uint8_t TRACE_ENDS_STOP;
 
-struct cpu_stats {
-  std::string name;
-  uint64_t begin_instrs = 0, begin_cycles = 0;
-  uint64_t end_instrs = 0, end_cycles = 0;
-  uint64_t total_rob_occupancy_at_branch_mispredict = 0;
 
-  std::array<long long, 8> total_branch_types = {};
-  std::array<long long, 8> branch_type_misses = {};
-
-  uint64_t instrs() const { return end_instrs - begin_instrs; }
-  uint64_t cycles() const { return end_cycles - begin_cycles; }
-};
-
-struct LSQ_ENTRY {
-  uint64_t instr_id = 0;
-  uint64_t virtual_address = 0;
-  uint64_t ip = 0;
-  uint64_t event_cycle = 0;
-
-  std::array<uint8_t, 2> asid = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
-  bool fetch_issued = false;
-
-  uint64_t producer_id = std::numeric_limits<uint64_t>::max();
-  std::vector<std::reference_wrapper<std::optional<LSQ_ENTRY>>> lq_depend_on_me{};
-
-  LSQ_ENTRY(uint64_t id, uint64_t addr, uint64_t ip, std::array<uint8_t, 2> asid);
-  void finish(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end) const;
-};
 
 // cpu
-class O3_CPU : public champsim::operable
-{
-public:
-  uint32_t cpu = 0;
-
-  // cycle
-  uint64_t begin_phase_cycle = 0;
-  uint64_t begin_phase_instr = 0;
-  uint64_t finish_phase_cycle = 0;
-  uint64_t finish_phase_instr = 0;
-  uint64_t last_heartbeat_cycle = 0;
-  uint64_t last_heartbeat_instr = 0;
-  uint64_t next_print_instruction = STAT_PRINTING_PERIOD;
-
-  // instruction
-  uint64_t num_retired = 0;
-
-  bool show_heartbeat = true;
-
-  using stats_type = cpu_stats;
-
-  stats_type roi_stats{}, sim_stats{};
-
-  // instruction buffer
-  struct dib_shift {
-    std::size_t shamt;
-    auto operator()(uint64_t val) const { return val >> shamt; }
-  };
-  using dib_type = champsim::lru_table<uint64_t, dib_shift, dib_shift>;
-  dib_type DIB;
-
-  // reorder buffer, load/store queue, register file
-  std::deque<ooo_model_instr> IFETCH_BUFFER;
-  std::deque<ooo_model_instr> DISPATCH_BUFFER;
-  std::deque<ooo_model_instr> DECODE_BUFFER;
-  std::deque<ooo_model_instr> ROB;
-
-  std::vector<std::optional<LSQ_ENTRY>> LQ;
-  std::deque<LSQ_ENTRY> SQ;
-
-  std::array<std::vector<std::reference_wrapper<ooo_model_instr>>, std::numeric_limits<uint8_t>::max() + 1> reg_producers;
-
-  // Constants
-  const std::size_t IFETCH_BUFFER_SIZE, DISPATCH_BUFFER_SIZE, DECODE_BUFFER_SIZE, ROB_SIZE, SQ_SIZE;
-  const long int FETCH_WIDTH, DECODE_WIDTH, DISPATCH_WIDTH, SCHEDULER_SIZE, EXEC_WIDTH;
-  const long int LQ_WIDTH, SQ_WIDTH;
-  const long int RETIRE_WIDTH;
-  const unsigned BRANCH_MISPREDICT_PENALTY, DISPATCH_LATENCY, DECODE_LATENCY, SCHEDULING_LATENCY, EXEC_LATENCY;
-  const long int L1I_BANDWIDTH, L1D_BANDWIDTH;
-
-  // branch
-  uint64_t fetch_resume_cycle = 0;
-
-  const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
-  std::deque<ooo_model_instr> input_queue;
-
-  CacheBus L1I_bus, L1D_bus;
-  CACHE* l1i;
-
-  void initialize() override final;
-  long operate() override final;
-  void begin_phase() override final;
-  void end_phase(unsigned cpu) override final;
-
-  void initialize_instruction();
-  long check_dib();
-  long fetch_instruction();
-  long promote_to_decode();
-  long decode_instruction();
-  long dispatch_instruction();
-  long schedule_instruction();
-  long execute_instruction();
-  long operate_lsq();
-  long complete_inflight_instruction();
-  long handle_memory_return();
-  long retire_rob();
-
-  bool do_init_instruction(ooo_model_instr& instr);
-  bool do_predict_branch(ooo_model_instr& instr);
-  void do_check_dib(ooo_model_instr& instr);
-  bool do_fetch_instruction(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end);
-  void do_dib_update(const ooo_model_instr& instr);
-  void do_scheduling(ooo_model_instr& instr);
-  void do_execution(ooo_model_instr& rob_it);
-  void do_memory_scheduling(ooo_model_instr& instr);
-  void do_complete_execution(ooo_model_instr& instr);
-  void do_sq_forward_to_lq(LSQ_ENTRY& sq_entry, LSQ_ENTRY& lq_entry);
-
-  void do_finish_store(const LSQ_ENTRY& sq_entry);
-  bool do_complete_store(const LSQ_ENTRY& sq_entry);
-  bool execute_load(const LSQ_ENTRY& lq_entry);
-
-  uint64_t roi_instr() const { return roi_stats.instrs(); }
-  uint64_t roi_cycle() const { return roi_stats.cycles(); }
-  uint64_t sim_instr() const { return num_retired - begin_phase_instr; }
-  uint64_t sim_cycle() const { return current_cycle - sim_stats.begin_cycles; }
-
-  void print_deadlock() override final;
-
-#include "ooo_cpu_module_decl.inc"
-
-  struct module_concept {
-    virtual ~module_concept() = default;
-
-    virtual void impl_initialize_branch_predictor() = 0;
-    virtual void impl_last_branch_result(uint64_t ip, uint64_t target, uint8_t taken, uint8_t branch_type) = 0;
-    virtual uint8_t impl_predict_branch(uint64_t ip) = 0;
-
-    virtual void impl_initialize_btb() = 0;
-    virtual void impl_update_btb(uint64_t ip, uint64_t predicted_target, uint8_t taken, uint8_t branch_type) = 0;
-    virtual std::pair<uint64_t, uint8_t> impl_btb_prediction(uint64_t ip) = 0;
-  };
-
-  template <unsigned long long B_FLAG, unsigned long long T_FLAG>
-  struct module_model final : module_concept {
-    O3_CPU* intern_;
-    explicit module_model(O3_CPU* core) : intern_(core) {}
-
-    void impl_initialize_branch_predictor();
-    void impl_last_branch_result(uint64_t ip, uint64_t target, uint8_t taken, uint8_t branch_type);
-    uint8_t impl_predict_branch(uint64_t ip);
-
-    void impl_initialize_btb();
-    void impl_update_btb(uint64_t ip, uint64_t predicted_target, uint8_t taken, uint8_t branch_type);
-    std::pair<uint64_t, uint8_t> impl_btb_prediction(uint64_t ip);
-  };
-
-  std::unique_ptr<module_concept> module_pimpl;
-
-  void impl_initialize_branch_predictor() { module_pimpl->impl_initialize_branch_predictor(); }
-  void impl_last_branch_result(uint64_t ip, uint64_t target, uint8_t taken, uint8_t branch_type)
-  {
-    module_pimpl->impl_last_branch_result(ip, target, taken, branch_type);
-  }
-  uint8_t impl_predict_branch(uint64_t ip) { return module_pimpl->impl_predict_branch(ip); }
-
-  void impl_initialize_btb() { module_pimpl->impl_initialize_btb(); }
-  void impl_update_btb(uint64_t ip, uint64_t predicted_target, uint8_t taken, uint8_t branch_type)
-  {
-    module_pimpl->impl_update_btb(ip, predicted_target, taken, branch_type);
-  }
-  std::pair<uint64_t, uint8_t> impl_btb_prediction(uint64_t ip) { return module_pimpl->impl_btb_prediction(ip); }
-
-  class builder_conversion_tag
-  {
-  };
-  template <unsigned long long B_FLAG = 0, unsigned long long T_FLAG = 0>
-  class Builder
-  {
-    using self_type = Builder<B_FLAG, T_FLAG>;
-
-    uint32_t m_cpu{};
-    double m_freq_scale{};
-    std::size_t m_dib_set{};
-    std::size_t m_dib_way{};
-    std::size_t m_dib_window{};
-    std::size_t m_ifetch_buffer_size{};
-    std::size_t m_decode_buffer_size{};
-    std::size_t m_dispatch_buffer_size{};
-    std::size_t m_rob_size{};
-    std::size_t m_lq_size{};
-    std::size_t m_sq_size{};
-    unsigned m_fetch_width{};
-    unsigned m_decode_width{};
-    unsigned m_dispatch_width{};
-    unsigned m_schedule_width{};
-    unsigned m_execute_width{};
-    unsigned m_lq_width{};
-    unsigned m_sq_width{};
-    unsigned m_retire_width{};
-    unsigned m_mispredict_penalty{};
-    unsigned m_decode_latency{};
-    unsigned m_dispatch_latency{};
-    unsigned m_schedule_latency{};
-    unsigned m_execute_latency{};
-
-    CACHE* m_l1i{};
-    long int m_l1i_bw{};
-    long int m_l1d_bw{};
-    champsim::channel* m_fetch_queues{};
-    champsim::channel* m_data_queues{};
-
-    friend class O3_CPU;
-
-    template <unsigned long long OTHER_B, unsigned long long OTHER_T>
-    Builder(builder_conversion_tag, const Builder<OTHER_B, OTHER_T>& other)
-        : m_cpu(other.m_cpu), m_freq_scale(other.m_freq_scale), m_dib_set(other.m_dib_set), m_dib_way(other.m_dib_way), m_dib_window(other.m_dib_window),
-          m_ifetch_buffer_size(other.m_ifetch_buffer_size), m_decode_buffer_size(other.m_decode_buffer_size),
-          m_dispatch_buffer_size(other.m_dispatch_buffer_size), m_rob_size(other.m_rob_size), m_lq_size(other.m_lq_size), m_sq_size(other.m_sq_size),
-          m_fetch_width(other.m_fetch_width), m_decode_width(other.m_decode_width), m_dispatch_width(other.m_dispatch_width),
-          m_schedule_width(other.m_schedule_width), m_execute_width(other.m_execute_width), m_lq_width(other.m_lq_width), m_sq_width(other.m_sq_width),
-          m_retire_width(other.m_retire_width), m_mispredict_penalty(other.m_mispredict_penalty), m_decode_latency(other.m_decode_latency),
-          m_dispatch_latency(other.m_dispatch_latency), m_schedule_latency(other.m_schedule_latency), m_execute_latency(other.m_execute_latency),
-          m_l1i(other.m_l1i), m_l1i_bw(other.m_l1i_bw), m_l1d_bw(other.m_l1d_bw), m_fetch_queues(other.m_fetch_queues), m_data_queues(other.m_data_queues)
-    {
-    }
-
+class O3_CPU {
   public:
-    Builder() = default;
+    uint32_t cpu;
 
-    self_type& index(uint32_t cpu_)
-    {
-      m_cpu = cpu_;
-      return *this;
-    }
-    self_type& frequency(double freq_scale_)
-    {
-      m_freq_scale = freq_scale_;
-      return *this;
-    }
-    self_type& dib_set(std::size_t dib_set_)
-    {
-      m_dib_set = dib_set_;
-      return *this;
-    }
-    self_type& dib_way(std::size_t dib_way_)
-    {
-      m_dib_way = dib_way_;
-      return *this;
-    }
-    self_type& dib_window(std::size_t dib_window_)
-    {
-      m_dib_window = dib_window_;
-      return *this;
-    }
-    self_type& ifetch_buffer_size(std::size_t ifetch_buffer_size_)
-    {
-      m_ifetch_buffer_size = ifetch_buffer_size_;
-      return *this;
-    }
-    self_type& decode_buffer_size(std::size_t decode_buffer_size_)
-    {
-      m_decode_buffer_size = decode_buffer_size_;
-      return *this;
-    }
-    self_type& dispatch_buffer_size(std::size_t dispatch_buffer_size_)
-    {
-      m_dispatch_buffer_size = dispatch_buffer_size_;
-      return *this;
-    }
-    self_type& rob_size(std::size_t rob_size_)
-    {
-      m_rob_size = rob_size_;
-      return *this;
-    }
-    self_type& lq_size(std::size_t lq_size_)
-    {
-      m_lq_size = lq_size_;
-      return *this;
-    }
-    self_type& sq_size(std::size_t sq_size_)
-    {
-      m_sq_size = sq_size_;
-      return *this;
-    }
-    self_type& fetch_width(unsigned fetch_width_)
-    {
-      m_fetch_width = fetch_width_;
-      return *this;
-    }
-    self_type& decode_width(unsigned decode_width_)
-    {
-      m_decode_width = decode_width_;
-      return *this;
-    }
-    self_type& dispatch_width(unsigned dispatch_width_)
-    {
-      m_dispatch_width = dispatch_width_;
-      return *this;
-    }
-    self_type& schedule_width(unsigned schedule_width_)
-    {
-      m_schedule_width = schedule_width_;
-      return *this;
-    }
-    self_type& execute_width(unsigned execute_width_)
-    {
-      m_execute_width = execute_width_;
-      return *this;
-    }
-    self_type& lq_width(unsigned lq_width_)
-    {
-      m_lq_width = lq_width_;
-      return *this;
-    }
-    self_type& sq_width(unsigned sq_width_)
-    {
-      m_sq_width = sq_width_;
-      return *this;
-    }
-    self_type& retire_width(unsigned retire_width_)
-    {
-      m_retire_width = retire_width_;
-      return *this;
-    }
-    self_type& mispredict_penalty(unsigned mispredict_penalty_)
-    {
-      m_mispredict_penalty = mispredict_penalty_;
-      return *this;
-    }
-    self_type& decode_latency(unsigned decode_latency_)
-    {
-      m_decode_latency = decode_latency_;
-      return *this;
-    }
-    self_type& dispatch_latency(unsigned dispatch_latency_)
-    {
-      m_dispatch_latency = dispatch_latency_;
-      return *this;
-    }
-    self_type& schedule_latency(unsigned schedule_latency_)
-    {
-      m_schedule_latency = schedule_latency_;
-      return *this;
-    }
-    self_type& execute_latency(unsigned execute_latency_)
-    {
-      m_execute_latency = execute_latency_;
-      return *this;
-    }
-    self_type& l1i(CACHE* l1i_)
-    {
-      m_l1i = l1i_;
-      return *this;
-    }
-    self_type& l1i_bandwidth(long int l1i_bw_)
-    {
-      m_l1i_bw = l1i_bw_;
-      return *this;
-    }
-    self_type& l1d_bandwidth(long int l1d_bw_)
-    {
-      m_l1d_bw = l1d_bw_;
-      return *this;
-    }
-    self_type& fetch_queues(champsim::channel* fetch_queues_)
-    {
-      m_fetch_queues = fetch_queues_;
-      return *this;
-    }
-    self_type& data_queues(champsim::channel* data_queues_)
-    {
-      m_data_queues = data_queues_;
-      return *this;
+    // trace
+    FILE *trace_file;
+    char trace_string[1024];
+    char gunzip_command[1024];
+    int context_switch, operating_index;
+
+    // instruction
+    input_instr next_instr;
+    input_instr current_instr;
+    cloudsuite_instr current_cloudsuite_instr;
+    uint64_t instr_unique_id, completed_executions, 
+             begin_sim_cycle, begin_sim_instr, 
+             last_sim_cycle, last_sim_instr,
+             finish_sim_cycle, finish_sim_instr,
+             warmup_instructions, simulation_instructions, instrs_to_read_this_cycle, instrs_to_fetch_this_cycle,
+             next_print_instruction, num_retired;
+    uint32_t inflight_reg_executions, inflight_mem_executions, num_searched;
+    uint32_t next_ITLB_fetch;
+
+    // reorder buffer, load/store queue, register file
+    CORE_BUFFER IFETCH_BUFFER{"IFETCH_BUFFER", FETCH_WIDTH*2};
+    CORE_BUFFER DECODE_BUFFER{"DECODE_BUFFER", DECODE_WIDTH*3};
+    CORE_BUFFER ROB{"ROB", ROB_SIZE};
+    LOAD_STORE_QUEUE LQ{"LQ", LQ_SIZE}, SQ{"SQ", SQ_SIZE};
+    
+    // store array, this structure is required to properly handle store instructions
+    uint64_t STA[STA_SIZE], STA_head, STA_tail; 
+
+    // Ready-To-Execute
+    uint32_t RTE0[ROB_SIZE], RTE0_head, RTE0_tail, 
+             RTE1[ROB_SIZE], RTE1_head, RTE1_tail;  
+
+    // Ready-To-Load
+    uint32_t RTL0[LQ_SIZE], RTL0_head, RTL0_tail, 
+             RTL1[LQ_SIZE], RTL1_head, RTL1_tail;  
+
+    // Ready-To-Store
+    uint32_t RTS0[SQ_SIZE], RTS0_head, RTS0_tail,
+             RTS1[SQ_SIZE], RTS1_head, RTS1_tail;
+
+    // branch
+    int branch_mispredict_stall_fetch; // flag that says that we should stall because a branch prediction was wrong
+    int mispredicted_branch_iw_index; // index in the instruction window of the mispredicted branch.  fetch resumes after the instruction at this index executes
+    uint8_t  fetch_stall;
+    uint64_t fetch_resume_cycle;
+    uint64_t num_branch, branch_mispredictions;
+    uint64_t total_rob_occupancy_at_branch_mispredict;
+	uint64_t total_branch_types[8];
+
+    //@Vishal
+    uint64_t sim_RAW_hits, roi_RAW_hits, //Loads hitting in Store queue
+	     sim_load_gen, roi_load_gen, //Loads generated by cpu
+	     sim_load_sent, roi_load_sent, //Loads sent to L1D cache
+    	     sim_store_gen, roi_store_gen, //Stores generated by cpu
+             sim_store_sent, roi_store_sent; //Stores sent to L1D cache
+
+    // TLBs and caches
+    CACHE ITLB{"ITLB", ITLB_SET, ITLB_WAY, ITLB_SET*ITLB_WAY, ITLB_WQ_SIZE, ITLB_RQ_SIZE, ITLB_PQ_SIZE, ITLB_MSHR_SIZE},
+          DTLB{"DTLB", DTLB_SET, DTLB_WAY, DTLB_SET*DTLB_WAY, DTLB_WQ_SIZE, DTLB_RQ_SIZE, DTLB_PQ_SIZE, DTLB_MSHR_SIZE},
+          STLB{"STLB", STLB_SET, STLB_WAY, STLB_SET*STLB_WAY, STLB_WQ_SIZE, STLB_RQ_SIZE, STLB_PQ_SIZE, STLB_MSHR_SIZE},
+          L1I{"L1I", L1I_SET, L1I_WAY, L1I_SET*L1I_WAY, L1I_WQ_SIZE, L1I_RQ_SIZE, L1I_PQ_SIZE, L1I_MSHR_SIZE},
+          L1D{"L1D", L1D_SET, L1D_WAY, L1D_SET*L1D_WAY, L1D_WQ_SIZE, L1D_RQ_SIZE, L1D_PQ_SIZE, L1D_MSHR_SIZE},
+          L2C{"L2C", L2C_SET, L2C_WAY, L2C_SET*L2C_WAY, L2C_WQ_SIZE, L2C_RQ_SIZE, L2C_PQ_SIZE, L2C_MSHR_SIZE},
+		  BTB{"BTB", BTB_SET, BTB_WAY, BTB_SET*BTB_WAY, 0, 0, 0, 0};
+
+    #ifdef PUSH_DTLB_PB
+    CACHE DTLB_PB{"DTLB_PB", DTLB_PB_SET, DTLB_PB_WAY, DTLB_PB_SET*DTLB_PB_WAY, DTLB_PB_WQ_SIZE, DTLB_PB_RQ_SIZE, DTLB_PB_PQ_SIZE, DTLB_PB_MSHR_SIZE};
+    #endif
+
+    PAGE_TABLE_WALKER PTW{"PTW"}; 
+
+    // constructor
+    O3_CPU() {
+        cpu = 0;
+
+        // trace
+        trace_file = NULL;
+	context_switch = 0;
+	operating_index = -1;
+	
+
+        // instruction
+        instr_unique_id = 0;
+        completed_executions = 0;
+        begin_sim_cycle = 0;
+        begin_sim_instr = 0;
+        last_sim_cycle = 0;
+        last_sim_instr = 0;
+        finish_sim_cycle = 0;
+        finish_sim_instr = 0;
+        warmup_instructions = 0;
+        simulation_instructions = 0;
+        instrs_to_read_this_cycle = 0;
+        instrs_to_fetch_this_cycle = 0;
+
+        next_print_instruction = STAT_PRINTING_PERIOD;
+        num_retired = 0;
+
+        inflight_reg_executions = 0;
+        inflight_mem_executions = 0;
+        num_searched = 0;
+
+        next_ITLB_fetch = 0;
+
+        // branch
+        branch_mispredict_stall_fetch = 0;
+        mispredicted_branch_iw_index = 0;
+        fetch_stall = 0;
+	fetch_resume_cycle = 0;
+        num_branch = 0;
+        branch_mispredictions = 0;
+
+       	for(uint32_t i=0; i<8; i++)
+		total_branch_types[i] = 0;
+
+        for (uint32_t i=0; i<STA_SIZE; i++)
+            STA[i] = UINT64_MAX;
+        STA_head = 0;
+        STA_tail = 0;
+
+        for (uint32_t i=0; i<ROB_SIZE; i++) {
+            RTE0[i] = ROB_SIZE;
+            RTE1[i] = ROB_SIZE;
+        }
+        RTE0_head = 0;
+        RTE1_head = 0;
+        RTE0_tail = 0;
+        RTE1_tail = 0;
+
+        for (uint32_t i=0; i<LQ_SIZE; i++) {
+            RTL0[i] = LQ_SIZE;
+            RTL1[i] = LQ_SIZE;
+        }
+        RTL0_head = 0;
+        RTL1_head = 0;
+        RTL0_tail = 0;
+        RTL1_tail = 0;
+
+        for (uint32_t i=0; i<SQ_SIZE; i++) {
+            RTS0[i] = SQ_SIZE;
+            RTS1[i] = SQ_SIZE;
+        }
+        RTS0_head = 0;
+        RTS1_head = 0;
+        RTS0_tail = 0;
+        RTS1_tail = 0;
     }
 
-    template <unsigned long long B>
-    Builder<B, T_FLAG> branch_predictor()
-    {
-      return Builder<B, T_FLAG>{builder_conversion_tag{}, *this};
-    }
-    template <unsigned long long T>
-    Builder<B_FLAG, T> btb()
-    {
-      return Builder<B_FLAG, T>{builder_conversion_tag{}, *this};
-    }
-  };
+    // functions
+    void read_from_trace(),
+	    //handle_branch(), Neelu: Now it is read_from_trace.
+         fetch_instruction(),
+	 decode_and_dispatch(),
+         schedule_instruction(),
+         execute_instruction(),
+         schedule_memory_instruction(),
+         execute_memory_instruction(),
+         do_scheduling(uint32_t rob_index),  
+         reg_dependency(uint32_t rob_index),
+         do_execution(uint32_t rob_index),
+         do_memory_scheduling(uint32_t rob_index),
+         operate_lsq(),
+         complete_execution(uint32_t rob_index),
+         reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t source_index),
+         reg_RAW_release(uint32_t rob_index),
+         mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_index, uint32_t lq_index),
+         //handle_o3_fetch(PACKET *current_packet, uint32_t cache_type), //@Vishal: This function is not used anywhere
+         handle_merged_translation(PACKET *provider), 
+         handle_merged_load(PACKET *provider),
+         release_load_queue(uint32_t lq_index),
+         complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb),
+         complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb);
 
-  template <unsigned long long B_FLAG, unsigned long long T_FLAG>
-  explicit O3_CPU(Builder<B_FLAG, T_FLAG> b)
-      : champsim::operable(b.m_freq_scale), cpu(b.m_cpu), DIB(b.m_dib_set, b.m_dib_way, {champsim::lg2(b.m_dib_window)}, {champsim::lg2(b.m_dib_window)}),
-        LQ(b.m_lq_size), IFETCH_BUFFER_SIZE(b.m_ifetch_buffer_size), DISPATCH_BUFFER_SIZE(b.m_dispatch_buffer_size), DECODE_BUFFER_SIZE(b.m_decode_buffer_size),
-        ROB_SIZE(b.m_rob_size), SQ_SIZE(b.m_sq_size), FETCH_WIDTH(b.m_fetch_width), DECODE_WIDTH(b.m_decode_width), DISPATCH_WIDTH(b.m_dispatch_width),
-        SCHEDULER_SIZE(b.m_schedule_width), EXEC_WIDTH(b.m_execute_width), LQ_WIDTH(b.m_lq_width), SQ_WIDTH(b.m_sq_width), RETIRE_WIDTH(b.m_retire_width),
-        BRANCH_MISPREDICT_PENALTY(b.m_mispredict_penalty), DISPATCH_LATENCY(b.m_dispatch_latency), DECODE_LATENCY(b.m_decode_latency),
-        SCHEDULING_LATENCY(b.m_schedule_latency), EXEC_LATENCY(b.m_execute_latency), L1I_BANDWIDTH(b.m_l1i_bw), L1D_BANDWIDTH(b.m_l1d_bw),
-        L1I_bus(b.m_cpu, b.m_fetch_queues), L1D_bus(b.m_cpu, b.m_data_queues), l1i(b.m_l1i), module_pimpl(std::make_unique<module_model<B_FLAG, T_FLAG>>(this))
-  {
-  }
+    void initialize_core();
+    void core_final_stats();
+    void add_load_queue(uint32_t rob_index, uint32_t data_index),
+         add_store_queue(uint32_t rob_index, uint32_t data_index),
+         execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_index);
+    int  execute_load(uint32_t rob_index, uint32_t sq_index, uint32_t data_index);
+    void check_dependency(int prior, int current);
+    void operate_cache();
+    void update_rob();
+    void retire_rob();
+
+    uint32_t  add_to_rob(ooo_model_instr *arch_instr),
+              check_rob(uint64_t instr_id);
+
+	uint32_t add_to_ifetch_buffer(ooo_model_instr *arch_instr);
+	uint32_t add_to_decode_buffer(ooo_model_instr *arch_instr);
+
+    uint32_t check_and_add_lsq(uint32_t rob_index);
+
+    // branch predictor
+    uint8_t predict_branch(uint64_t ip);
+    void    initialize_branch_predictor(),
+            last_branch_result(uint64_t ip, uint8_t taken); 
+
+     void l1i_prefetcher_initialize();
+     void l1i_prefetcher_branch_operate(uint64_t ip, uint8_t branch_type, uint64_t branch_target);
+     void l1i_prefetcher_cache_operate(uint64_t v_addr, uint8_t cache_hit, uint8_t prefetch_hit);
+     void l1i_prefetcher_cycle_operate();
+     void l1i_prefetcher_cache_fill(uint64_t v_addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_v_addr);
+     void l1i_prefetcher_final_stats();
+     int prefetch_code_line(uint64_t pf_v_addr);
+
+void fill_btb(uint64_t trigger, uint64_t target);
+
 };
 
-#include "ooo_cpu_module_def.inc"
+extern O3_CPU ooo_cpu[NUM_CPUS];
 
-#endif
 
-#ifdef SET_ASIDE_CHAMPSIM_MODULE
-#undef SET_ASIDE_CHAMPSIM_MODULE
-#define CHAMPSIM_MODULE
 #endif

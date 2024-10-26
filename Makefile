@@ -1,72 +1,79 @@
-ROOT_DIR = $(patsubst %/,%,$(dir $(abspath $(firstword $(MAKEFILE_LIST)))))
+app = champsim
 
-CPPFLAGS += -MMD -I$(ROOT_DIR)/inc
-CXXFLAGS += --std=c++17 -O3 -Wall -Wextra -Wshadow -Wpedantic
+srcExt = cc
+srcDir = src branch replacement prefetcher
+objDir = obj
+binDir = bin
+inc = inc
 
-# vcpkg integration
-TRIPLET_DIR = $(patsubst %/,%,$(firstword $(filter-out $(ROOT_DIR)/vcpkg_installed/vcpkg/, $(wildcard $(ROOT_DIR)/vcpkg_installed/*/))))
-CPPFLAGS += -isystem $(TRIPLET_DIR)/include
-LDFLAGS  += -L$(TRIPLET_DIR)/lib -L$(TRIPLET_DIR)/lib/manual-link
-LDLIBS   += -llzma -lz -lbz2 -lfmt
+debug = 1
 
-.phony: all all_execs clean configclean test makedirs
+CFlags = -Wall -g -std=c++11 -O3
+LDFlags = -static
+libs =
+libDir =
 
-test_main_name=$(ROOT_DIR)/test/bin/000-test-main
 
-all: all_execs
+#************************ DO NOT EDIT BELOW THIS LINE! ************************
 
-# Generated configuration makefile contains:
-#  - $(executable_name), the list of all executables in the configuration
-#  - $(build_dirs), the list of all directories that hold executables
-#  - $(build_objs), the list of all object files corresponding to core sources
-#  - $(module_dirs), the list of all directories that hold module object files
-#  - $(module_objs), the list of all object files corresponding to modules
-#  - All dependencies and flags assigned according to the modules
-include _configuration.mk
+ifeq ($(debug),1)
+	debug=-g
+else
+	debug=
+endif
+inc := $(addprefix -I,$(inc))
+libs := $(addprefix -l,$(libs))
+libDir := $(addprefix -L,$(libDir))
+CFlags += -c $(debug) $(inc) $(libDir) $(libs)
+sources := $(shell find $(srcDir) -name '*.$(srcExt)')
+srcDirs := $(shell find . -name '*.$(srcExt)' -exec dirname {} \; | uniq)
+objects := $(patsubst %.$(srcExt),$(objDir)/%.o,$(sources))
 
-all_execs: $(filter-out $(test_main_name), $(executable_name))
+ifeq ($(srcExt),cc)
+	CC = $(CXX)
+else
+	CFlags += -std=gnu99
+endif
 
-# Remove all intermediate files
+.phony: all clean distclean
+
+
+all: $(binDir)/$(app)
+
+$(binDir)/$(app): buildrepo $(objects)
+	@mkdir -p `dirname $@`
+	@echo "Linking $@..."
+	@$(CC) $(objects) $(LDFlags) -o $@
+
+$(objDir)/%.o: %.$(srcExt)
+	@echo "Generating dependencies for $<..."
+	@$(call make-depend,$<,$@,$(subst .o,.d,$@))
+	@echo "Compiling $<..."
+	@$(CC) $(CFlags) $< -o $@
+
 clean:
-	@-find src test .csconfig $(module_dirs) \( -name '*.o' -o -name '*.d' \) -delete &> /dev/null
-	@-$(RM) inc/champsim_constants.h
-	@-$(RM) inc/cache_modules.h
-	@-$(RM) inc/ooo_cpu_modules.h
-	@-$(RM) src/core_inst.cc
-	@-$(RM) $(test_main_name)
+	$(RM) -r $(objDir)
 
-# Remove all configuration files
-configclean: clean
-	@-$(RM) -r $(module_dirs) _configuration.mk
+distclean: clean
+	$(RM) -r $(binDir)/$(app)
 
-# Make directories that don't exist
-# exclude "test" to not conflict with the phony target
-$(filter-out test, $(sort $(build_dirs) $(module_dirs))): | $(dir $@)
-	-mkdir $@
+buildrepo:
+	@$(call make-repo)
 
-# All .o files should be made like .cc files
-$(build_objs) $(module_objs):
-	$(COMPILE.cc) $(OUTPUT_OPTION) $<
+define make-repo
+   for dir in $(srcDirs); \
+   do \
+	mkdir -p $(objDir)/$$dir; \
+   done
+endef
 
-# Add address sanitizers for tests
-#$(test_main_name): CXXFLAGS += -fsanitize=address -fno-omit-frame-pointer
-$(test_main_name): CXXFLAGS += -g3 -Og -Wconversion
-$(test_main_name): LDLIBS   += -lCatch2Main -lCatch2
 
-# Link test executable
-$(test_main_name):
-	$(LINK.cc) $(LDFLAGS) -o $@ $(filter-out %/main.o, $^) $(LOADLIBES) $(LDLIBS)
-
-# Link main executables
-$(filter-out $(test_main_name), $(executable_name)):
-	$(LINK.cc) $(LDFLAGS) -o $@ $^ $(LOADLIBES) $(LDLIBS)
-
-# Tests: build and run
-test: $(test_main_name)
-	$(test_main_name)
-
-pytest:
-	PYTHONPATH=$(PYTHONPATH):$(shell pwd) python3 -m unittest discover -v --start-directory='test/python'
-
--include $(foreach dir,$(wildcard .csconfig/*/) $(wildcard .csconfig/test/*/),$(wildcard $(dir)/obj/*.d))
-
+# usage: $(call make-depend,source-file,object-file,depend-file)
+define make-depend
+  $(CC) -MM       \
+        -MF $3    \
+        -MP       \
+        -MT $2    \
+        $(CFlags) \
+        $1
+endef
