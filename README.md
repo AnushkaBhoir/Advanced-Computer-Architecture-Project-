@@ -1,8 +1,3 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/2a23ZfC_)
-<p align="center">
-  <h1 align="center"> ChampSim </h1>
-  <p> ChampSim is a trace-based simulator for a microarchitecture study. You find the required trace files at (https://drive.google.com/drive/folders/1JmFmXRZ1A517KtmiZvpBwobfb79dk_GM?usp=sharing) <p>
-</p>
 
 ## Tested Environment & Dependencies
 
@@ -12,15 +7,7 @@
 
 # Compile
 
-To makes things simper, you are only required to specify three parameters: L1D prefetcher, STLB prefetcher, and the number of cores. 
-For example, `./build_champsim.sh no no 1` builds a single-core processor with no L1 data prefetcher or STLB prefetcher.
-```
-$ ./build_champsim.sh ip_stride asp 1
-
-$ ./build_champsim.sh ${L1D_PREFETCHER} ${STLB_PREFETCHER} ${NUM_CORE}
-```
-
-In case you need to modify the L2C/LLC prefetchers, you can manually change it in `./build_champsim.sh`
+$ ./build_champsim.sh no no 1
 
 # Run simulation
 
