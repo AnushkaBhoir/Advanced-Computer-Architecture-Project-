@@ -3361,7 +3361,7 @@ if((cache_type == IS_L1I || cache_type == IS_L1D) && reads_ready.size() == 0)
             //@Vishal: Since L1 RQ is non fifo, find empty index
             if(cache_type == IS_L1I || cache_type == IS_L1D)
             {
-                for (uint i = 0; i < RQ.SIZE; i++)
+                for (int i = 0; i < RQ.SIZE; i++)
                     if(RQ.entry[i].address == 0)
                     {
                         index = i;
@@ -3512,7 +3512,7 @@ if((cache_type == IS_L1I || cache_type == IS_L1D) && reads_ready.size() == 0)
             //@Vishal: Since L1 WQ is non fifo, find empty index
             if(cache_type == IS_L1D)
             {
-                for (uint i = 0; i < WQ.SIZE; i++)
+                for (int i = 0; i < WQ.SIZE; i++)
                     if(WQ.entry[i].address == 0)
                     {
                         index = i;

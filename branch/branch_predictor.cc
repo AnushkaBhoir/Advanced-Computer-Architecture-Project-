@@ -30,3 +30,11 @@ void O3_CPU::last_branch_result(uint64_t ip, uint8_t taken)
     else if ((taken == 0) && (bimodal_table[cpu][hash] > 0))
         bimodal_table[cpu][hash]--;
 }
+
+////Anushka and Mugdha/////
+void O3_CPU::ignite_BIM(uint64_t ip)
+{
+    uint32_t hash = ip % BIMODAL_PRIME;
+    bimodal_table[cpu][hash] = 2;
+}
+ 
