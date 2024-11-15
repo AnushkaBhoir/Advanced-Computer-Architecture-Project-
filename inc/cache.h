@@ -124,9 +124,6 @@ class CACHE : public MEMORY {
              pf_issued,
              pf_useful,
              pf_useless,
-            //  pf_nextline_useful, 
-            //  pf_ipstride_useful,
-            //  pf_complexstride_useful,
              pf_fill,
              pf_miss_l1, // Agus
              pf_late,	// Number of On-demand translation requests hit in TLB MSHR with packet.type = PREFETCH.
@@ -230,9 +227,6 @@ class CACHE : public MEMORY {
         pf_issued = 0;
         pf_useful = 0;
         pf_useless = 0;
-        //  pf_nextline_useful = 0;
-            //  pf_ipstride_useful = 0;
-            //  pf_complexstride_useful = 0;
         pf_fill = 0;
         pf_late = 0;
         pf_miss_l1 = 0;
