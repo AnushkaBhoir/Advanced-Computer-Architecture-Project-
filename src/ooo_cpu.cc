@@ -1008,37 +1008,35 @@ void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type
     record_last_target_address[cpu] = target; 
 
 }
-void O3_CPU::replay_phase(){
+void O3_CPU::replay_phase(uint64_t trigger)
+{
 
-    if(isBTBflushed == 0) return;
-    if(flag != 0){
-        // flag--;
-        flag = 0;
-    }else{
-        uint64_t target;
-        uint8_t isIP = record[cpu][replay_iter[cpu]].entry_format;
-        uint8_t branch_type =  record[cpu][replay_iter[cpu]].branch_type;
-        int branch_delta = record[cpu][replay_iter[cpu]].branch_delta;
-        int target_delta = record[cpu][replay_iter[cpu]].target_delta;
-        uint64_t IP;
-        if(isIP){
-            IP = record[cpu][replay_iter[cpu]].full_addr;
-        } 
-        else{
-            IP = replay_last_target_address[cpu] + branch_delta;
-        }
-        target = IP + target_delta;
-        fill_btb(IP, target);
-        replay_iter[cpu] = (replay_iter[cpu] + 1) % 32768;
-        if(branch_type == 1){
-            ignite_BIM(IP);
-        }
-        // flag = 3;
-        flag = 1;
-        // prefetch_line(uint64_t ip, uint64_t base_addr, uint64_t pf_addr, int pf_fill_level, uint32_t prefetch_metadata) /*, uint64_t prefetch_id)*/		//Neelu: commented. 
-        // {
+  if (isBTBflushed == 0)
+    return;
+  if (flag != 0) {
+    // flag--;
+    flag = 0;
+  } else {
+    uint64_t target;
+    uint8_t isIP = record[cpu][replay_iter[cpu]].entry_format;
+    uint8_t branch_type = record[cpu][replay_iter[cpu]].branch_type;
+    int branch_delta = record[cpu][replay_iter[cpu]].branch_delta;
+    int target_delta = record[cpu][replay_iter[cpu]].target_delta;
+    uint64_t IP;
+    if (isIP) {
+      IP = record[cpu][replay_iter[cpu]].full_addr;
+    } else {
+      IP = replay_last_target_address[cpu] + branch_delta;
     }
-
+    target = IP + target_delta;
+    fill_btb(IP, target);
+    int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
+    replay_iter[cpu] = (replay_iter[cpu] + 1) % 32768;
+    if (branch_type == 1) {
+      ignite_BIM(IP);
+    }
+    flag = 1;
+  }
 }
 
 void O3_CPU::fill_btb(uint64_t trigger, uint64_t target)
@@ -1096,9 +1094,9 @@ void O3_CPU::decode_and_dispatch()
 				//if(branch_type == BRANCH_CONDITIONAL)
 				//assert(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip + 4 != DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);		
 				fill_btb(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);	
-                record_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target, branch_type1); 
-                replay_phase(); /// Anushka and Mugdha/////	
-			}
+                record_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target, branch_type1);
+                replay_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip); /// Anushka and Mugdha/////
+                        }
 		}
 
 
@@ -2219,9 +2217,9 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 				if(ROB.entry[rob_index].branch_taken)
 				{
 					fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target);
-                    record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type); 
-                    replay_phase(); ///anushka and mugdha///
-				}
+                    record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
+                    replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                                }
 	     	}
 
 			if(ROB.entry[rob_index].btb_miss && ROB.entry[rob_index].branch_mispredicted == 0)
@@ -2233,9 +2231,9 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 	fetch_resume_cycle = current_core_cycle[cpu] + 1; //Resume fetch from next cycle.
 				}
 				fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target);
-                record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type); 
-                replay_phase(); ///anushka and mugdha///
-        	}
+                record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
+                replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                }
 
 
             //DP(if(warmup_complete[cpu]) {
@@ -2263,9 +2261,9 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 				if(ROB.entry[rob_index].branch_taken)
 				{
 					fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target);
-                    record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type); 
-                    replay_phase(); ///anushka and mugdha///
-				}
+                    record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
+                    replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                                }
 	     	}
 
 			if(ROB.entry[rob_index].btb_miss && ROB.entry[rob_index].branch_mispredicted == 0)
@@ -2277,9 +2275,9 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 	fetch_resume_cycle = current_core_cycle[cpu] + 1; //Resume fetch from next cycle.
 				}
 				fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target);
-                record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type); 
-                replay_phase(); ///anushka and mugdha///
-        	}
+                record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
+                replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                }
 
                 //DP(if(warmup_complete[cpu]) {
                 //cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id;
