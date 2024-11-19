@@ -193,8 +193,8 @@ class O3_CPU {
 	    //handle_branch(), Neelu: Now it is read_from_trace.
          fetch_instruction(),
 	 decode_and_dispatch(),
-    record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type), ////////anushka and mugdha //////
-    replay_phase(),
+    record_phase(uint64_t trigger,uint64_t target,uint8_t branch_type), ////////anushka and mugdha //////
+    replay_phase(uint64_t trigger),
          schedule_instruction(),
          execute_instruction(),
          schedule_memory_instruction(),
@@ -247,6 +247,7 @@ class O3_CPU {
      void l1i_prefetcher_cache_fill(uint64_t v_addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_v_addr);
      void l1i_prefetcher_final_stats();
      int prefetch_code_line(uint64_t pf_v_addr);
+     int prefetch_code_line_L2(uint64_t pf_v_addr);
 
 void fill_btb(uint64_t trigger, uint64_t target);
 

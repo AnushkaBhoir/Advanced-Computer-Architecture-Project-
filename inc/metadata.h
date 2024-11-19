@@ -1,5 +1,5 @@
 struct metadata {
-    uint8_t entry_format;
+    int entry_format;
     uint8_t branch_type;
     int branch_delta;
     int target_delta;
