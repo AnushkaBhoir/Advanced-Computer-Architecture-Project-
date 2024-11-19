@@ -982,30 +982,42 @@ void O3_CPU::fetch_instruction()
 
 ///////////////Anushka and Mugdha/////////////////////////////
 void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type){
+    // cout<<trigger<<" "<<target<<endl;
+    int branch_delta_value, target_delta_value; 
     if(record_last_target_address[cpu] == 0){
         record[cpu][record_iter[cpu]].entry_format = 1;
         if(branch_type == BRANCH_CONDITIONAL)
         record[cpu][record_iter[cpu]].branch_type = 1;
         record[cpu][record_iter[cpu]].full_addr = trigger;
-        record[cpu][record_iter[cpu]].target_delta = target - trigger;       
+        record[cpu][record_iter[cpu]].target_delta = static_cast<int>(target - trigger);       
     }
     else{
         // check size of the difference
         record[cpu][record_iter[cpu]].entry_format = 0;
         if(branch_type == BRANCH_CONDITIONAL) record[cpu][record_iter[cpu]].branch_type = 1;
-        int branch_delta_value = trigger - record_last_target_address[cpu];
-        int target_delta_value = target - trigger;  
+        branch_delta_value = static_cast<int>(trigger - record_last_target_address[cpu]);
+        target_delta_value = static_cast<int>(target - trigger);  
 
+        // cout<<branch_delta_value<<" "<<target_delta_value<<endl;
+        
         if (branch_delta_value > (1 << 8)) {
             record[cpu][record_iter[cpu]].entry_format = 1; 
             record[cpu][record_iter[cpu]].full_addr = trigger; 
         } else{
-            record[cpu][record_iter[cpu]].branch_delta = static_cast<uint8_t>(branch_delta_value);
+            record[cpu][record_iter[cpu]].branch_delta = branch_delta_value;
         } 
         record[cpu][record_iter[cpu]].target_delta = target_delta_value;  
     }
+
+    // cout << "Recording: Trigger=" << trigger 
+    //  << ", Target=" << target 
+    //  << ", BranchDelta=" << branch_delta_value 
+    //  << ", TargetDelta=" << target_delta_value 
+    //  << ", EntryFormat=" << record[cpu][record_iter[cpu]].entry_format << endl;
+
     record_iter[cpu] = (record_iter[cpu] + 1) % 32768;
     record_last_target_address[cpu] = target; 
+
 
 }
 void O3_CPU::replay_phase(uint64_t trigger)
@@ -1018,7 +1030,7 @@ void O3_CPU::replay_phase(uint64_t trigger)
     flag = 0;
   } else {
     uint64_t target;
-    uint8_t isIP = record[cpu][replay_iter[cpu]].entry_format;
+    int isIP = record[cpu][replay_iter[cpu]].entry_format;
     uint8_t branch_type = record[cpu][replay_iter[cpu]].branch_type;
     int branch_delta = record[cpu][replay_iter[cpu]].branch_delta;
     int target_delta = record[cpu][replay_iter[cpu]].target_delta;
@@ -1029,13 +1041,25 @@ void O3_CPU::replay_phase(uint64_t trigger)
       IP = replay_last_target_address[cpu] + branch_delta;
     }
     target = IP + target_delta;
+    
+    // cout<<IP<<" "<<target<<endl;
     fill_btb(IP, target);
+    // cout<<trigger<<"\n";
+    // if(trigger != 0)
     int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
+    // int x  = prefetch_code_line_L2(target);
+    replay_last_target_address[cpu] = target;
     replay_iter[cpu] = (replay_iter[cpu] + 1) % 32768;
     if (branch_type == 1) {
       ignite_BIM(IP);
     }
     flag = 1;
+    cout << "Replaying: IP=" << IP 
+     << ", Target=" << target 
+     << ", BranchDelta=" << branch_delta 
+     << ", TargetDelta=" << target_delta 
+     << ", EntryFormat=" << isIP << endl;
+
   }
 }
 
@@ -1094,7 +1118,9 @@ void O3_CPU::decode_and_dispatch()
 				//if(branch_type == BRANCH_CONDITIONAL)
 				//assert(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip + 4 != DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);		
 				fill_btb(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);	
-                record_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target, branch_type1);
+                record_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip,
+                DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target,
+                branch_type1);
                 replay_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip); /// Anushka and Mugdha/////
                         }
 		}
@@ -1160,6 +1186,50 @@ void O3_CPU::decode_and_dispatch()
 		}
 	}
 }//Ending of decode_and_dispatch()
+int O3_CPU::prefetch_code_line_L2(uint64_t pf_v_addr)
+{
+    if (pf_v_addr == 0)
+    {
+        cerr << "Cannot prefetch code line 0x0 !!!" << endl;
+        assert(0);
+    }
+
+    // Increment prefetch request counter for L2
+    L2C.pf_requested++;
+
+    if (L2C.PQ.occupancy < L2C.PQ.SIZE) // Check if L2 prefetch queue has space
+    {
+        PACKET pf_packet;
+        pf_packet.instruction = 1;      // This is a code prefetch
+        pf_packet.is_data = 0;          // This is not a data packet
+        pf_packet.fill_level = FILL_L2; // Prefetch to L2 cache
+        pf_packet.cpu = cpu;            // CPU ID for this packet
+
+        // Assign virtual and physical addresses (physical addresses left untranslated for now)
+        // cout<<pf_v_addr<<endl;
+        pf_packet.address = pf_v_addr >> LOG2_BLOCK_SIZE;
+        pf_packet.full_addr = pf_v_addr;
+
+        // Marking untranslated (if TLBs aren't accessed yet)
+        pf_packet.translated = 0;
+        pf_packet.full_physical_address = 0;
+
+        // Set prefetch-specific details
+        pf_packet.ip = pf_v_addr;
+        pf_packet.type = PREFETCH;
+        pf_packet.event_cycle = current_core_cycle[cpu];
+
+        // Add the packet to L2 prefetch queue
+        L2C.add_pq(&pf_packet);
+        L2C.pf_issued++;
+
+        return 1;
+    }
+
+    // Prefetch queue is full, unable to issue prefetch
+    return 0;
+}
+
 
 int O3_CPU::prefetch_code_line(uint64_t pf_v_addr)
 {
