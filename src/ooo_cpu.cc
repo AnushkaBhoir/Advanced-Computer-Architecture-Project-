@@ -569,6 +569,7 @@ void O3_CPU::read_from_trace()
     //instrs_to_fetch_this_cycle = num_reads;
 }
 
+
 uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
 {
 	
@@ -2937,15 +2938,15 @@ void O3_CPU::retire_rob()
         num_retired++;
 
         ///////Anushka and Mugdha/////////
-        if(warmup_complete[0]){
-            isBTBflushed = 1;
-            if(num_retired%200000 == 0){
-                BTB.flush_TLB();
-                STLB.flush_TLB();
-                ITLB.flush_TLB();
-                DTLB.flush_TLB();
-            }
-        }
+        // if(warmup_complete[0]){
+        //     isBTBflushed = 1;
+        //     if(num_retired%200000 == 0){
+        //         BTB.flush_TLB();
+        //         STLB.flush_TLB();
+        //         ITLB.flush_TLB();
+        //         DTLB.flush_TLB();
+        //     }
+        // }
 
 			
     }
