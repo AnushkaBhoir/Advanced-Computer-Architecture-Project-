@@ -987,6 +987,7 @@ int main(int argc, char** argv)
     // check to see if knobs changed using getopt_long()
     int c, index;
     while (1) {
+        // of interest switch case mapping
         static struct option long_options[] =
         {
             {"warmup_instructions", required_argument, 0, 'w'},
@@ -1086,7 +1087,7 @@ int main(int argc, char** argv)
     
     for (int i=0; i<argc; i++) {	    
         if (found_traces) {
-        	
+        	// of interest
             printf("CPU %d runs %s\n", count_traces, argv[i]);
 
 	    //@Vasudha: Perfect DTLB Prefetcher - read dumped page table
@@ -1103,7 +1104,20 @@ int main(int argc, char** argv)
 				assert(false);
 			}
 				
-
+        //gunzip command   
+        //of interest
+        // Anushka and Mugdha//////////////
+        
+        char* trace2 = "../traces/429.mcf-192B.champsimtrace.xz", *last_dot2 = strrchr(trace2, '.');
+        if (trace2[last_dot2 - trace2 + 1] == 'g') // gzip format
+            sprintf(ooo_cpu[count_traces].gunzip_command_2, "gunzip -c %s", trace2);
+        else if (trace2[last_dot2 - trace2 + 1] == 'x') // xz
+            sprintf(ooo_cpu[count_traces].gunzip_command_2, "xz -dc %s", trace2);
+        else {
+            cout << "ChampSim does not support traces other than gz or xz compression!" << endl; 
+            assert(0);
+        }
+        ////////////////////////
             if (full_name[last_dot - full_name + 1] == 'g') // gzip format
                 sprintf(ooo_cpu[count_traces].gunzip_command, "gunzip -c %s", argv[i]);
             else if (full_name[last_dot - full_name + 1] == 'x') // xz
@@ -1132,10 +1146,19 @@ int main(int argc, char** argv)
                 j++;
             }
 
+            //of interest 
+            ///////Anushka and Mugdha//////////
             ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
+            ooo_cpu[count_traces].trace_file2 = popen(ooo_cpu[count_traces].gunzip_command_2, "r");
+            ///////////////////////////////////////////////
+
             if (ooo_cpu[count_traces].trace_file == NULL) {
                 printf("\n*** Trace file not found: %s ***\n\n", argv[i]);
                 assert(0);
+            }
+            if (ooo_cpu[count_traces].trace_file2 == NULL) {
+                perror("Failed to open second trace file");
+                assert(false);
             }
 
            count_traces++;

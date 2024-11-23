@@ -8,11 +8,13 @@
 #include <algorithm>
 #include <metadata.h>
 
-metadata record[NUM_CPUS][1024*32];
-uint64_t record_last_target_address[NUM_CPUS] = {0};
-uint64_t replay_last_target_address[NUM_CPUS] = {0};
-uint32_t record_iter[NUM_CPUS] = {0};
-uint32_t replay_iter[NUM_CPUS] = {0};
+#define num_traces 2
+int last_num_retired = 0;
+metadata record[num_traces][1024*32];
+uint64_t record_last_target_address[num_traces] = {0};
+uint64_t replay_last_target_address[num_traces] = {0};
+uint32_t record_iter[num_traces] = {0};
+uint32_t replay_iter[num_traces] = {0};
 bool isBTBflushed = 0;
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS]; 
@@ -22,6 +24,7 @@ uint8_t TRACE_ENDS_STOP = 0;
 uint8_t UNIQUE_ASID[5];
 int asid_index=0;
 int flag = 0;
+int trace_flag = 0;
 int reg_instruction_pointer = REG_INSTRUCTION_POINTER, reg_flags = REG_FLAGS, reg_stack_pointer = REG_STACK_POINTER;
 
 
@@ -52,6 +55,42 @@ void O3_CPU::initialize_core()
 #endif
 
 
+}
+
+void log_trace_state(const char* message, FILE* trace_file, FILE* trace_file2, 
+                     const char* gunzip_command, const char* gunzip_command_2) {
+    cout << message << "\n";
+    cout << "Trace File 1: " << trace_file << "\n";
+    cout << "Trace File 2: " << trace_file2 << "\n";
+    cout << "Gunzip Command 1: " << gunzip_command << "\n";
+    cout << "Gunzip Command 2: " << gunzip_command_2 << "\n";
+}
+
+///anushka and mugdha///////
+void O3_CPU::swap_traces()
+{   
+    // log_trace_state("Before Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+    last_num_retired = num_retired;
+    // cout<<"onto next trace file "<<num_retired<<" " << trace_flag<<"\n";
+    FILE* temp = trace_file;
+    trace_file = trace_file2;
+    trace_file2 = temp;
+
+    char temp_command[1024];
+    strcpy(temp_command, gunzip_command);
+    strcpy(gunzip_command, gunzip_command_2);
+    strcpy(gunzip_command_2, temp_command);
+    // log_trace_state("After Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+    // char buffer[256];
+    // if (fread(buffer, 1, sizeof(buffer), trace_file) > 0) {
+    //     cout << "Successfully read from the swapped trace file.\n";
+    // } else {
+    //     perror("Failed to read from the swapped trace file");
+    // }
+
+    BTB.flush_TLB();
+    initialize_branch_predictor();
+    trace_flag = 1 ^ trace_flag;
 }
 
 
@@ -224,6 +263,17 @@ void O3_CPU::read_from_trace()
 			break;
 		} 
 		input_instr trace_read_instr;
+            // here check if num_retired % 50 Million
+
+            ////Anushka and Mugdha//////////////
+            if(num_retired % 5000000 == 0 && num_retired != 0){
+                if(warmup_complete[0] && last_num_retired != num_retired){
+                    log_trace_state("Before Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+                    swap_traces();
+                    log_trace_state("After Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+                }
+            }
+        //of interest
             if (!fread(&trace_read_instr, instr_size, 1, trace_file)) {
                 // reached end of file for this trace
                 cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl; 
@@ -236,7 +286,6 @@ void O3_CPU::read_from_trace()
                     assert(0);
                 }
             } else { // successfully read the trace
-
 
 		    if(instr_unique_id == 0)
 		    {
@@ -985,39 +1034,39 @@ void O3_CPU::fetch_instruction()
 void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type){
     // cout<<trigger<<" "<<target<<endl;
     int branch_delta_value, target_delta_value; 
-    if(record_last_target_address[cpu] == 0){
-        record[cpu][record_iter[cpu]].entry_format = 1;
+    if(record_last_target_address[trace_flag] == 0){
+        record[trace_flag][record_iter[trace_flag]].entry_format = 1;
         if(branch_type == BRANCH_CONDITIONAL)
-        record[cpu][record_iter[cpu]].branch_type = 1;
-        record[cpu][record_iter[cpu]].full_addr = trigger;
-        record[cpu][record_iter[cpu]].target_delta = static_cast<int>(target - trigger);       
+        record[trace_flag][record_iter[trace_flag]].branch_type = 1;
+        record[trace_flag][record_iter[trace_flag]].full_addr = trigger;
+        record[trace_flag][record_iter[trace_flag]].target_delta = static_cast<int>(target - trigger);       
     }
     else{
         // check size of the difference
-        record[cpu][record_iter[cpu]].entry_format = 0;
-        if(branch_type == BRANCH_CONDITIONAL) record[cpu][record_iter[cpu]].branch_type = 1;
-        branch_delta_value = static_cast<int>(trigger - record_last_target_address[cpu]);
+        record[trace_flag][record_iter[trace_flag]].entry_format = 0;
+        if(branch_type == BRANCH_CONDITIONAL) record[trace_flag][record_iter[trace_flag]].branch_type = 1;
+        branch_delta_value = static_cast<int>(trigger - record_last_target_address[trace_flag]);
         target_delta_value = static_cast<int>(target - trigger);  
 
         // cout<<branch_delta_value<<" "<<target_delta_value<<endl;
         
         if (branch_delta_value > (1 << 8)) {
-            record[cpu][record_iter[cpu]].entry_format = 1; 
-            record[cpu][record_iter[cpu]].full_addr = trigger; 
+            record[trace_flag][record_iter[trace_flag]].entry_format = 1; 
+            record[trace_flag][record_iter[trace_flag]].full_addr = trigger; 
         } else{
-            record[cpu][record_iter[cpu]].branch_delta = branch_delta_value;
+            record[trace_flag][record_iter[trace_flag]].branch_delta = branch_delta_value;
         } 
-        record[cpu][record_iter[cpu]].target_delta = target_delta_value;  
+        record[trace_flag][record_iter[trace_flag]].target_delta = target_delta_value;  
     }
 
     // cout << "Recording: Trigger=" << trigger 
     //  << ", Target=" << target 
     //  << ", BranchDelta=" << branch_delta_value 
     //  << ", TargetDelta=" << target_delta_value 
-    //  << ", EntryFormat=" << record[cpu][record_iter[cpu]].entry_format << endl;
+    //  << ", EntryFormat=" << record[trace_flag][record_iter[trace_flag]].entry_format << endl;
 
-    record_iter[cpu] = (record_iter[cpu] + 1) % 32768;
-    record_last_target_address[cpu] = target; 
+    record_iter[trace_flag] = (record_iter[trace_flag] + 1) % 32768;
+    record_last_target_address[trace_flag] = target; 
 
 
 }
@@ -1026,20 +1075,20 @@ void O3_CPU::replay_phase(uint64_t trigger)
 
   if (isBTBflushed == 0)
     return;
-  if (flag != 0) {
-    // flag--;
-    flag = 0;
-  } else {
+//   if (flag != 0) {
+//     // flag--;
+//     flag = 0;
+//   } else {
     uint64_t target;
-    int isIP = record[cpu][replay_iter[cpu]].entry_format;
-    uint8_t branch_type = record[cpu][replay_iter[cpu]].branch_type;
-    int branch_delta = record[cpu][replay_iter[cpu]].branch_delta;
-    int target_delta = record[cpu][replay_iter[cpu]].target_delta;
+    int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
+    uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
+    int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
+    int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
     uint64_t IP;
     if (isIP) {
-      IP = record[cpu][replay_iter[cpu]].full_addr;
+      IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
     } else {
-      IP = replay_last_target_address[cpu] + branch_delta;
+      IP = replay_last_target_address[trace_flag] + branch_delta;
     }
     target = IP + target_delta;
     
@@ -1049,19 +1098,17 @@ void O3_CPU::replay_phase(uint64_t trigger)
     // if(trigger != 0)
     int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
     // int x  = prefetch_code_line_L2(target);
-    replay_last_target_address[cpu] = target;
-    replay_iter[cpu] = (replay_iter[cpu] + 1) % 32768;
+    replay_last_target_address[trace_flag] = target;
+    replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 32768;
     if (branch_type == 1) {
       ignite_BIM(IP);
     }
-    flag = 1;
-    cout << "Replaying: IP=" << IP 
-     << ", Target=" << target 
-     << ", BranchDelta=" << branch_delta 
-     << ", TargetDelta=" << target_delta 
-     << ", EntryFormat=" << isIP << endl;
-
-  }
+    // flag = 1;
+    // cout << "Replaying: IP=" << IP 
+    //  << ", Target=" << target 
+    //  << ", BranchDelta=" << branch_delta 
+    //  << ", TargetDelta=" << target_delta 
+    //  << ", EntryFormat=" << isIP << endl;
 }
 
 void O3_CPU::fill_btb(uint64_t trigger, uint64_t target)
