@@ -41,9 +41,9 @@ class O3_CPU {
     uint32_t cpu;
 
     // trace
-    FILE *trace_file;
+    FILE *trace_file, *trace_file2;
     char trace_string[1024];
-    char gunzip_command[1024];
+    char gunzip_command[1024], gunzip_command_2[1024];
     int context_switch, operating_index;
 
     // instruction
@@ -190,6 +190,7 @@ class O3_CPU {
 
     // functions
     void read_from_trace(),
+    swap_traces(), /////Anushka and mugdha//////////
 	    //handle_branch(), Neelu: Now it is read_from_trace.
          fetch_instruction(),
 	 decode_and_dispatch(),
@@ -249,7 +250,7 @@ class O3_CPU {
      int prefetch_code_line(uint64_t pf_v_addr);
      int prefetch_code_line_L2(uint64_t pf_v_addr);
 
-void fill_btb(uint64_t trigger, uint64_t target);
+void fill_btb(uint64_t trigger, uint64_t target, int is_replayed);
 
 };
 

@@ -198,7 +198,8 @@ class CACHE : public MEMORY {
                 block[i][j].lru = j;
             }
         }
-
+        //  replay_rate[0] = 0;
+        // replay_rate[1] = 0;
         for (uint32_t i=0; i<NUM_CPUS; i++) {
             upper_level_icache[i] = NULL;
             upper_level_dcache[i] = NULL;
@@ -213,6 +214,7 @@ class CACHE : public MEMORY {
                 roi_miss[i][j] = 0;
 		roi_instr_miss[i][j] = 0;
             }
+           
         }
 
 	total_miss_latency = 0;

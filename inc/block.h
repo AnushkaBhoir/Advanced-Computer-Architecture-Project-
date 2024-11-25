@@ -10,6 +10,7 @@ class BLOCK {
   public:
     uint8_t valid,
             prefetch,
+            bprefetch,
             dirty,
             used,
 	    instruction,
@@ -35,6 +36,7 @@ class BLOCK {
     BLOCK() {
         valid = 0;
         prefetch = 0;
+        bprefetch = 0;
         dirty = 0;
         used = 0;
 	instruction = 0;
