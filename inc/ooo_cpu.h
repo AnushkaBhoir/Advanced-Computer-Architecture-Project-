@@ -41,9 +41,11 @@ class O3_CPU {
     uint32_t cpu;
 
     // trace
-    FILE *trace_file, *trace_file2;
+    FILE *trace_file;
+    FILE* trace_files[NUM_TRACES - 1];
     char trace_string[1024];
-    char gunzip_command[1024], gunzip_command_2[1024];
+    char gunzip_command[1024];
+    char gunzip_commands[NUM_TRACES - 1][1024];
     int context_switch, operating_index;
 
     // instruction
