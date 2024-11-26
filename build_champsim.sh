@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ "$#" -lt 3 ]; then
+if [ "$#" -gt 2 ]; then
     echo "Illegal number of parameters"
     echo "Usage: ./build_champsim.sh [branch_pred] [l1i_pref] [l1d_pref]
     [l2c_pref] [llc_pref] [itlb_pref] [dtlb_pref] [stlb_pref] [btb_repl]
@@ -12,12 +12,13 @@ fi
 # ChampSim configuration
 BRANCH=bimodal           # branch/*.bpred
 L1I_PREFETCHER=no   # prefetcher/*.l1i_pref
-L1D_PREFETCHER=${1}   # prefetcher/*.l1d_pref
+L1D_PREFETCHER=no  # prefetcher/*.l1d_pref
+L1D_PREFETCHER=no   # prefetcher/*.l1d_pref
 L2C_PREFETCHER=no   # prefetcher/*.l2c_pref
 LLC_PREFETCHER=no   # prefetcher/*.llc_pref
 ITLB_PREFETCHER=no  # prefetcher/*.itlb_pref
 DTLB_PREFETCHER=no  # prefetcher/*.dtlb_pref
-STLB_PREFETCHER=${2}  # prefetcher/*.stlb_pref
+STLB_PREFETCHER=no # prefetcher/*.stlb_pref
 
 BTB_REPLACEMENT=lru   # prefetcher/*.btb_repl	
 L1I_REPLACEMENT=lru   # prefetcher/*.l1i_repl
@@ -27,8 +28,9 @@ LLC_REPLACEMENT=lru   # prefetcher/*.llc_repl
 ITLB_REPLACEMENT=lru  # prefetcher/*.itlb_repl
 DTLB_REPLACEMENT=lru  # prefetcher/*.dtlb_repl
 STLB_REPLACEMENT=lru  # prefetcher/*.stlb_repl
-
-NUM_CORE=${3}         # tested up to 8-core system
+IGNITE=${1}
+NUM_TRACES=${2}
+NUM_CORE=1         # tested up to 8-core system
 
 ############## Some useful macros ###############
 BOLD=$(tput bold)
@@ -172,9 +174,37 @@ else
         echo "Building single-core ChampSim..."
     fi
 fi
+
+#anushka and mugdha
+if [ "$NUM_TRACES" -gt "1" ]; then
+    echo "Building multi-traces on single system environment..."
+    sed -i.bak 's/\<NUM_TRACES 1\>/NUM_TRACES '${NUM_TRACES}'/g' inc/champsim.h
+#	sed -i.bak 's/\<DRAM_CHANNELS 1\>/DRAM_CHANNELS 2/g' inc/champsim.h
+#	sed -i.bak 's/\<DRAM_CHANNELS_LOG2 0\>/DRAM_CHANNELS_LOG2 1/g' inc/champsim.h
+else
+    if [ "$NUM_CORE" -lt "1" ]; then
+        echo "Number of core: $NUM_CORE must be greater or equal than 1"
+        exit 1
+    else
+        echo "Building single-core ChampSim..."
+    fi
+fi
+
+# Check if IGNITE is set to yes
+if [ "$IGNITE" = "yes" ]; then
+    echo "Enabling IGNITE..."
+    sed -i.bak 's/\<IGNITE 0\>/IGNITE 1/g' inc/champsim.h
+else
+    echo "IGNITE is not enabled. Keeping IGNITE as 0."
+fi
+
 echo
 
-# Change prefetchers and replacement policy
+
+# add code, if $ignite = yes, sed -i.bak 's/\<IGNITE 0\>/IGNITE '${IGNITE}'/g' inc/champsim.h
+# else no change
+#reset the value back to 0 in the start
+# Change prefetchers and replacement policy 
 cp branch/${BRANCH}.bpred branch/branch_predictor.cc
 cp prefetcher/${L1I_PREFETCHER}.l1i_pref prefetcher/l1i_prefetcher.cc
 cp prefetcher/${L1D_PREFETCHER}.l1d_pref prefetcher/l1d_prefetcher.cc
@@ -231,14 +261,15 @@ echo "DTLB Replacement: ${DTLB_REPLACEMENT}"
 echo "STLB Replacement: ${STLB_REPLACEMENT}"
 
 echo "Cores: ${NUM_CORE}"
-BINARY_NAME="${L1D_PREFETCHER}-${STLB_PREFETCHER}-${NUM_CORE}core"
+BINARY_NAME="${IGNITE}-${NUM_TRACES}traces"
 echo "Binary: bin/${BINARY_NAME}"
 echo ""
 mv bin/champsim bin/${BINARY_NAME}
 
 
-# Restore to the default configuration
-sed -i.bak 's/\<NUM_CPUS '${NUM_CORE}'\>/NUM_CPUS 1/g' inc/champsim.h
+sed -i.bak 's/\<NUM_CPUS [0-9]\+/NUM_CPUS 1/g' inc/champsim.h
+sed -i.bak 's/\<NUM_TRACES [0-9]\+/NUM_TRACES 1/g' inc/champsim.h
+sed -i.bak 's/\<IGNITE [0-9]\+/IGNITE 0/g' inc/champsim.h
 #sed -i.bak 's/\<DRAM_CHANNELS 2\>/DRAM_CHANNELS 1/g' inc/champsim.h
 #sed -i.bak 's/\<DRAM_CHANNELS_LOG2 1\>/DRAM_CHANNELS_LOG2 0/g' inc/champsim.h
 
