@@ -1084,7 +1084,7 @@ int main(int argc, char** argv)
     // search through the argv for "-traces"
     int found_traces = 0;
     int count_traces = 0;
-    
+    int ctr = 0;
     for (int i=0; i<argc; i++) {	    
         if (found_traces) {
         	// of interest
@@ -1107,25 +1107,38 @@ int main(int argc, char** argv)
         //gunzip command   
         //of interest
         // Anushka and Mugdha//////////////
-        
-        char* trace2 = "../traces/429.mcf-192B.champsimtrace.xz", *last_dot2 = strrchr(trace2, '.');
-        if (trace2[last_dot2 - trace2 + 1] == 'g') // gzip format
-            sprintf(ooo_cpu[count_traces].gunzip_command_2, "gunzip -c %s", trace2);
-        else if (trace2[last_dot2 - trace2 + 1] == 'x') // xz
-            sprintf(ooo_cpu[count_traces].gunzip_command_2, "xz -dc %s", trace2);
-        else {
-            cout << "ChampSim does not support traces other than gz or xz compression!" << endl; 
-            assert(0);
+
+        if(ctr == NUM_TRACES){
+                cout<<"number of trace files more than specified";
+                assert(0);
         }
-        ////////////////////////
-            if (full_name[last_dot - full_name + 1] == 'g') // gzip format
-                sprintf(ooo_cpu[count_traces].gunzip_command, "gunzip -c %s", argv[i]);
-            else if (full_name[last_dot - full_name + 1] == 'x') // xz
-                sprintf(ooo_cpu[count_traces].gunzip_command, "xz -dc %s", argv[i]);
+
+         char* trace2 = argv[i]; last_dot = strrchr(trace2, '.');
+        cout<<trace2<<" "<<ctr<<endl;
+        if(ctr == 0){
+            if (trace2[last_dot - trace2 + 1] == 'g') // gzip format
+            sprintf(ooo_cpu[count_traces].gunzip_command, "gunzip -c %s", trace2);
+            else if (trace2[last_dot - trace2 + 1] == 'x') // xz
+                sprintf(ooo_cpu[count_traces].gunzip_command, "xz -dc %s", trace2);
             else {
                 cout << "ChampSim does not support traces other than gz or xz compression!" << endl; 
                 assert(0);
             }
+        }else{
+            if (trace2[last_dot - trace2 + 1] == 'g'){ // gzip format
+            cout<<"command came: "<<ooo_cpu[count_traces].gunzip_commands[ctr - 1]<<endl;
+            sprintf(ooo_cpu[count_traces].gunzip_commands[ctr - 1], "gunzip -c %s", trace2);
+            
+            }
+            else if (trace2[last_dot - trace2 + 1] == 'x') // xz
+                sprintf(ooo_cpu[count_traces].gunzip_commands[ctr - 1], "xz -dc %s", trace2);
+            else {
+                cout << "ChampSim does not support traces other than gz or xz compression!" << endl; 
+                assert(0);
+            }
+        }
+
+        // ctr++; // anushka and mugdha///////////
 
             char *pch[100];
             int count_str = 0;
@@ -1148,24 +1161,28 @@ int main(int argc, char** argv)
 
             //of interest 
             ///////Anushka and Mugdha//////////
-            ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
-            ooo_cpu[count_traces].trace_file2 = popen(ooo_cpu[count_traces].gunzip_command_2, "r");
+            //  if(ctr == 0){
+            //     cout<<"sknnddnvhhhhhhhhhhhhh\n";
+                ooo_cpu[count_traces].trace_file = popen(ooo_cpu[count_traces].gunzip_command, "r");
+            // }else{
+                ooo_cpu[count_traces].trace_files[ctr-1] = popen(ooo_cpu[count_traces].gunzip_commands[ctr-1], "r");
+            // }
             ///////////////////////////////////////////////
 
             if (ooo_cpu[count_traces].trace_file == NULL) {
                 printf("\n*** Trace file not found: %s ***\n\n", argv[i]);
                 assert(0);
             }
-            if (ooo_cpu[count_traces].trace_file2 == NULL) {
-                perror("Failed to open second trace file");
-                assert(false);
-            }
-
-           count_traces++;
-            if (count_traces > NUM_CPUS) {
-                printf("\n*** Too many traces for the configured number of cores ***\n\n");
-                assert(0);
-            }
+            // if (ooo_cpu[count_traces].trace_file2 == NULL) {
+            //     perror("Failed to open second trace file");
+            //     assert(false);
+            // }
+           ctr++;
+           count_traces = 0;
+            // if (count_traces > NUM_CPUS) {
+            //     printf("\n*** Too many traces for the configured number of cores ***\n\n");
+            //     assert(0);
+            // }
         }
         else if(strcmp(argv[i],"-traces") == 0) {
             found_traces = 1;
@@ -1213,10 +1230,10 @@ int main(int argc, char** argv)
 //	}
     }
 
-    if (count_traces != NUM_CPUS) {
-        printf("\n*** Not enough traces for the configured number of cores ***\n\n");
-        assert(0);
-    }
+    // if (count_traces != NUM_CPUS) {
+    //     printf("\n*** Not enough traces for the configured number of cores ***\n\n");
+    //     assert(0);
+    // }
     // end trace file setup
     // TODO: can we initialize these variables from the class constructor?
     srand(seed_number);

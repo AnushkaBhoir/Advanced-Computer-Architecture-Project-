@@ -8,17 +8,18 @@
 #include <algorithm>
 #include <metadata.h>
 
-#define num_traces 2
 int num = 0;
+int curr = 0;
 int last_num_retired = 0;
-uint32_t replay_rate[num_traces] = {0};
-metadata record[num_traces][5000000];
-uint64_t record_last_target_address[num_traces] = {0};
-uint64_t replay_last_target_address[num_traces] = {0};
-uint32_t record_iter[num_traces] = {0};
-uint32_t replay_iter[num_traces] = {0};
-// uint32_t replay_rate[num_traces] = {0};
-bool isBTBflushed[num_traces] = {0};
+uint32_t replay_rate[NUM_TRACES] = {0};
+metadata record[NUM_TRACES][5000000];
+uint64_t record_last_target_address[NUM_TRACES] = {0};
+uint64_t replay_last_target_address[NUM_TRACES] = {0};
+uint32_t record_iter[NUM_TRACES] = {0};
+uint32_t replay_iter[NUM_TRACES] = {0};
+// uint32_t replay_rate[NUM_TRACES] = {0};
+
+bool isBTBflushed[NUM_TRACES] = {0};
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS]; 
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
@@ -26,7 +27,7 @@ uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 uint8_t TRACE_ENDS_STOP = 0;
 uint8_t UNIQUE_ASID[5];
 int asid_index=0;
-int flag[num_traces] = {0};
+int flag = 0;
 int trace_flag = 0;
 int reg_instruction_pointer = REG_INSTRUCTION_POINTER, reg_flags = REG_FLAGS, reg_stack_pointer = REG_STACK_POINTER;
 
@@ -61,41 +62,45 @@ void O3_CPU::initialize_core()
 }
 
 void log_trace_state(const char* message, FILE* trace_file, FILE* trace_file2, 
-                     const char* gunzip_command, const char* gunzip_command_2) {
+                     const char* gunzip_command, const char* gunzip_comman) {
     cout << message << "\n";
     cout << "Trace File 1: " << trace_file << "\n";
     cout << "Trace File 2: " << trace_file2 << "\n";
     cout << "Gunzip Command 1: " << gunzip_command << "\n";
-    cout << "Gunzip Command 2: " << gunzip_command_2 << "\n";
+    cout << "Gunzip Command 2: " << gunzip_comman << "\n";
 }
 
 ///anushka and mugdha///////
 void O3_CPU::swap_traces()
 {   
-    // log_trace_state("Before Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+    log_trace_state("Before Swap:", trace_file, trace_files[curr], gunzip_command, gunzip_commands[curr]);
     last_num_retired = num_retired;
     // cout<<"onto next trace file "<<num_retired<<" " << trace_flag<<"\n";
     FILE* temp = trace_file;
-    trace_file = trace_file2;
-    trace_file2 = temp;
+    trace_file = trace_files[curr];
+    trace_files[curr] = temp;
 
     char temp_command[1024];
     strcpy(temp_command, gunzip_command);
-    strcpy(gunzip_command, gunzip_command_2);
-    strcpy(gunzip_command_2, temp_command);
-    // log_trace_state("After Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
-    // char buffer[256];
-    // if (fread(buffer, 1, sizeof(buffer), trace_file) > 0) {
-    //     cout << "Successfully read from the swapped trace file.\n";
-    // } else {
-    //     perror("Failed to read from the swapped trace file");
-    // }
+    strcpy(gunzip_command, gunzip_commands[curr]);
+    strcpy(gunzip_commands[curr], temp_command);
+    log_trace_state("After Swap:", trace_file, trace_files[curr], gunzip_command, gunzip_commands[curr]);
+    cout<<"trace_Flag: "<<trace_flag<<" curr: "<<curr<<"\n";
+    char buffer[256];
+    if (fread(buffer, 1, sizeof(buffer), trace_file) > 0) {
+        cout << "Successfully read from the swapped trace file.\n";
+    } else {
+        perror("Failed to read from the swapped trace file");
+    }
 
     BTB.flush_TLB();
     isBTBflushed[trace_flag] = 1;
     initialize_branch_predictor();
-    trace_flag = 1 ^ trace_flag;
-}
+    trace_flag = (trace_flag + 1) % (NUM_TRACES);
+    if(NUM_TRACES > 1)
+        curr = (curr + 1) % (NUM_TRACES - 1) ;  
+        cout<<"again: "<<curr<<"\n";
+ }
 
 
 void O3_CPU::read_from_trace()
@@ -270,11 +275,11 @@ void O3_CPU::read_from_trace()
             // here check if num_retired % 50 Million
 
             ////Anushka and Mugdha//////////////
-            // if(num_retired % 500000 == 0 && num_retired != 0){
+            // if(num_retired % 50000000 == 0 && num_retired != 0){
             //     if(warmup_complete[0] && num_retired != last_num_retired){
-            //         log_trace_state("Before Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+            //         log_trace_state("Before Swap:", trace_file, trace_file2, gunzip_command, gunzip_commands[curr]);
             //         swap_traces();
-            //         log_trace_state("After Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+            //         log_trace_state("After Swap:", trace_file, trace_file2, gunzip_command, gunzip_commands[curr]);
             //     }
             // }
         //of interest
@@ -496,10 +501,7 @@ void O3_CPU::read_from_trace()
                                 if(BTB.block[btb_set][btb_way].bprefetch==1){
                                     if(replay_rate[trace_flag]>0){
                                         replay_rate[trace_flag]--;
-                                        BTB.block[btb_set][btb_way].bprefetch = 2;
-
-                                        // if(trace_flag)
-                                        // //cout<<trace_flag<<" "<<replay_rate[trace_flag]<<" decreased due to access hehe\n";
+                                        // cout<<"decreased\n";
                                     }
                                 }
 
@@ -531,9 +533,7 @@ void O3_CPU::read_from_trace()
                     if(BTB.block[btb_set][btb_way].bprefetch==1){
                         if(replay_rate[trace_flag]>0){
                             replay_rate[trace_flag]--;
-                            BTB.block[btb_set][btb_way].bprefetch = 2;
-                            // if(trace_flag)
-                            // cout<<replay_rate[trace_flag]<<" decreased due to access\n";
+                            // cout<<"decreased\n";
                         }
                     }
 				}
@@ -1058,9 +1058,6 @@ void O3_CPU::fetch_instruction()
 ///////////////Anushka and Mugdha/////////////////////////////
 void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type){
     // cout<<trigger<<" "<<target<<endl;
-
-    if(warmup_complete[0] == 0) return;
-
     int branch_delta_value = 0, target_delta_value; 
     if(record_last_target_address[trace_flag] == 0){
         record[trace_flag][record_iter[trace_flag]].entry_format = 1;
@@ -1091,14 +1088,14 @@ void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type
         record[trace_flag][record_iter[trace_flag]].target_delta = target_delta_value;  
     }
 
-    // if(trace_flag && record_iter[trace_flag] == 0){
-    //     cout << "Recording: Trigger=" << trigger 
-    //  << ", Target=" << target 
-    //  << ", BranchDelta=" << branch_delta_value 
-    //  << ", TargetDelta=" << target_delta_value 
-    //  << ", EntryFormat=" << record[trace_flag][record_iter[trace_flag]].entry_format << endl;
+    if(trace_flag){
+        cout << "Recording: Trigger=" << trigger 
+     << ", Target=" << target 
+     << ", BranchDelta=" << branch_delta_value 
+     << ", TargetDelta=" << target_delta_value 
+     << ", EntryFormat=" << record[trace_flag][record_iter[trace_flag]].entry_format << endl;
 
-    // }
+    }
 
     record_iter[trace_flag] = (record_iter[trace_flag] + 1) % 5000000;
     record_last_target_address[trace_flag] = target; 
@@ -1106,109 +1103,58 @@ void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type
 
 void O3_CPU::replay_phase(uint64_t trigger)
 {
-
-  if(warmup_complete[0] == 0){
+ 
+if(flag == 0){
+    flag = 1;
+}else{
+  if (isBTBflushed[trace_flag] == 0){  
     return;
-  } 
-  if (isBTBflushed[trace_flag] == 0) {
-    return;
-    }
-  int mode = 0; // mode = 0 (50% replay rate) and mode = 1 (25% replay rate)
-
-//   cout <<"replay rate: "<<replay_rate[trace_flag] << " " << (replay_iter[trace_flag] + 1) << " " << ((double)replay_rate[trace_flag] / (double)(replay_iter[trace_flag] + 1))
-//        << "\n";
-
-  if (((double)replay_rate[trace_flag] / (double)(replay_iter[trace_flag] + 1)) >= 0.5) {
-    mode = 1;
   }
-
-    if(mode ==0){
-        if (flag[trace_flag] % 4 == 0) {
-            // cout << "Higher rate skipped" << "\n";
-            flag[trace_flag] = (flag[trace_flag] + 1)% 4;
-        } else {
-            // cout << "Higher rate" << "\n";
-            flag[trace_flag] = (flag[trace_flag] + 1) % 4;
-            
-            uint64_t target;
-            int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
-            uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
-            int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
-            int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
-            uint64_t IP;
-            if (isIP) {
-            IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
-            } else {
-            IP = replay_last_target_address[trace_flag] + branch_delta;
-            }
-            target = IP + target_delta;
-
-            // cout<<"replay rate for "<<trace_flag<<" "<<replay_rate[trace_flag]<<"\n";
-            fill_btb(IP, target, 1);
-            int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
-
-            //  if(trace_flag && replay_iter[trace_flag] == 0){
-            //         cout << "Replaying: IP=" << IP
-            //  << ", Target=" << target
-            //  << ", BranchDelta=" << branch_delta
-            //  << ", TargetDelta=" << target_delta
-            //  <<", replay-iter="<< replay_iter[trace_flag]
-            //  << ", EntryFormat=" << isIP << endl;
-            // }
-
-            // int x  = prefetch_code_line_L2(target);
-            replay_last_target_address[trace_flag] = target;
-            replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 5000000;
-            if (branch_type == 1) {
-                // ignite_BIM(IP);
-            }
-            // flag[trace_flag] = 0;
-        }
+//   if (flag != 0) {
+//     // flag--;
+//     flag = 0;
+//   } else {
+   
+    uint64_t target;
+    int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
+    uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
+    int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
+    int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
+    uint64_t IP;
+    if (isIP) {
+      IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
+    //   cout<<"IP == " << IP<<"\n";
+    } else {
+      IP = replay_last_target_address[trace_flag] + branch_delta;
     }
-    else{
-        if (flag[trace_flag] %10  != 0) {
-            // cout << "Lower rate skipped" << "\n";
-            flag[trace_flag] = (flag[trace_flag] + 1) % 10;
-        } else {
-            // cout << "Lower rate replayed" << "\n";
-            flag[trace_flag] = (flag[trace_flag] + 1) % 10;
-            if (isBTBflushed[trace_flag] == 0) {
-                return;
-            }
-            uint64_t target;
-            int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
-            uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
-            int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
-            int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
-            uint64_t IP;
-            if (isIP) {
-            IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
-            } else {
-            IP = replay_last_target_address[trace_flag] + branch_delta;
-            }
-            target = IP + target_delta;
-
-            // cout<<"replay rate for "<<trace_flag<<" "<<replay_rate[trace_flag]<<"\n";
-            fill_btb(IP, target, 1);
-
-            int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
-        
-            //  if(trace_flag && replay_iter[trace_flag] == 0){
-            //         cout << "Replaying: IP=" << IP
-            //  << ", Target=" << target
-            //  << ", BranchDelta=" << branch_delta
-            //  << ", TargetDelta=" << target_delta
-            //  <<", replay-iter="<< replay_iter[trace_flag]
-            //  << ", EntryFormat=" << isIP << endl;
-            // }
-
-            replay_last_target_address[trace_flag] = target;
-            replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 5000000;
-            if (branch_type == 1) {
-            ignite_BIM(IP);
-            }
-        }
+    target = IP + target_delta;
+    
+    // cout<<IP<<" "<<target<<endl;
+    // cout<<"replay rate for "<<trace_flag<<" "<<replay_rate[trace_flag]<<"\n";
+    fill_btb(IP, target, 1);
+    // cout<<target<<"\n";
+    // if(target > 64){
+    int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
+  
+     if(trace_flag && replay_iter[trace_flag] == 0){
+            cout << "Replaying: IP=" << IP 
+     << ", Target=" << target 
+     << ", BranchDelta=" << branch_delta 
+     << ", TargetDelta=" << target_delta 
+     <<", replay-iter="<< replay_iter[trace_flag]
+     << ", EntryFormat=" << isIP << endl;
     }
+
+    // int x  = prefetch_code_line_L2(target);
+    replay_last_target_address[trace_flag] = target;
+    replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 5000000;
+    // if (branch_type == 1) {
+    // //   ignite_BIM(IP);
+    // }
+    flag = 0;
+    }
+
+   
 }
 
 void O3_CPU::fill_btb(uint64_t trigger, uint64_t target, int is_replayed)
@@ -1226,9 +1172,7 @@ void O3_CPU::fill_btb(uint64_t trigger, uint64_t target, int is_replayed)
         if(BTB.block[btb_set][btb_way].bprefetch==1){
             if(replay_rate[trace_flag]>0){
                 replay_rate[trace_flag]--;
-                BTB.block[btb_set][btb_way].bprefetch = 2;
-                // if(trace_flag)
-                // cout<<replay_rate[trace_flag]<<" decreased due to btb fill\n";
+                // cout<<"decreased\n";
             }
         }
 		if(entry.valid == 0)
@@ -1286,10 +1230,12 @@ void O3_CPU::decode_and_dispatch()
 				//if(branch_type == BRANCH_CONDITIONAL)
 				//assert(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip + 4 != DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);		
 				fill_btb(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target, 0);	
-                record_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip,
-                DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target,
-                branch_type1);
-                replay_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip); /// Anushka and Mugdha/////
+                if(IGNITE){
+                    record_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip,
+                    DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target,
+                    branch_type1);
+                    replay_phase(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip); /// Anushka and Mugdha/////
+                }
                 }
 		}
 
@@ -2455,8 +2401,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 				if(ROB.entry[rob_index].branch_taken)
 				{
 					fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, 0);
+                    if(IGNITE){
                     record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
                     replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                    }
                 }
 	     	}
 
@@ -2469,8 +2417,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 	fetch_resume_cycle = current_core_cycle[cpu] + 1; //Resume fetch from next cycle.
 				}
 				fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, 0);
+                if(IGNITE){
                 record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
                 replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                }
                 }
 
 
@@ -2499,8 +2449,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 				if(ROB.entry[rob_index].branch_taken)
 				{
 					fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, 0);
+                    if(IGNITE){
                     record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
                     replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                    }
                 }
 	     	}
 
@@ -2513,8 +2465,10 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 	fetch_resume_cycle = current_core_cycle[cpu] + 1; //Resume fetch from next cycle.
 				}
 				fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, 0);
+                if(IGNITE){
                 record_phase(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target, ROB.entry[rob_index].branch_type);
                 replay_phase(ROB.entry[rob_index].ip); /// anushka and mugdha///
+                }
                 }
 
                 //DP(if(warmup_complete[cpu]) {
@@ -3105,10 +3059,11 @@ void O3_CPU::retire_rob()
         num_retired++;
         // cout<<num_retired<<" "<<warmup_complete[0]<<"\n";
         if(num_retired % 5000000 == 0){
+            
                 if(warmup_complete[0] && (num_retired != last_num_retired)){
-                    // log_trace_state("Before Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+                    // log_trace_state("Before Swap:", trace_file, trace_files[curr], gunzip_command, gunzip_commands[curr]);
                     swap_traces();
-                    // log_trace_state("After Swap:", trace_file, trace_file2, gunzip_command, gunzip_command_2);
+                    // log_trace_state("After Swap:", trace_file, trace_files[curr], gunzip_command, gunzip_commands[curr]);
                 }
             }
         ///////Anushka and Mugdha/////////
