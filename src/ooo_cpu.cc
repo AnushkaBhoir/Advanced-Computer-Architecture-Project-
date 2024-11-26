@@ -26,7 +26,7 @@ uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 uint8_t TRACE_ENDS_STOP = 0;
 uint8_t UNIQUE_ASID[5];
 int asid_index=0;
-int flag = 0;
+int flag[num_traces] = {0};
 int trace_flag = 0;
 int reg_instruction_pointer = REG_INSTRUCTION_POINTER, reg_flags = REG_FLAGS, reg_stack_pointer = REG_STACK_POINTER;
 
@@ -496,7 +496,10 @@ void O3_CPU::read_from_trace()
                                 if(BTB.block[btb_set][btb_way].bprefetch==1){
                                     if(replay_rate[trace_flag]>0){
                                         replay_rate[trace_flag]--;
-                                        cout<<"decreased\n";
+                                        BTB.block[btb_set][btb_way].bprefetch = 2;
+
+                                        // if(trace_flag)
+                                        // //cout<<trace_flag<<" "<<replay_rate[trace_flag]<<" decreased due to access hehe\n";
                                     }
                                 }
 
@@ -528,7 +531,9 @@ void O3_CPU::read_from_trace()
                     if(BTB.block[btb_set][btb_way].bprefetch==1){
                         if(replay_rate[trace_flag]>0){
                             replay_rate[trace_flag]--;
-                            cout<<"decreased\n";
+                            BTB.block[btb_set][btb_way].bprefetch = 2;
+                            // if(trace_flag)
+                            // cout<<replay_rate[trace_flag]<<" decreased due to access\n";
                         }
                     }
 				}
@@ -1053,6 +1058,9 @@ void O3_CPU::fetch_instruction()
 ///////////////Anushka and Mugdha/////////////////////////////
 void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type){
     // cout<<trigger<<" "<<target<<endl;
+
+    if(warmup_complete[0] == 0) return;
+
     int branch_delta_value = 0, target_delta_value; 
     if(record_last_target_address[trace_flag] == 0){
         record[trace_flag][record_iter[trace_flag]].entry_format = 1;
@@ -1083,14 +1091,14 @@ void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type
         record[trace_flag][record_iter[trace_flag]].target_delta = target_delta_value;  
     }
 
-    if(trace_flag && record_iter[trace_flag] == 0){
-        cout << "Recording: Trigger=" << trigger 
-     << ", Target=" << target 
-     << ", BranchDelta=" << branch_delta_value 
-     << ", TargetDelta=" << target_delta_value 
-     << ", EntryFormat=" << record[trace_flag][record_iter[trace_flag]].entry_format << endl;
+    // if(trace_flag && record_iter[trace_flag] == 0){
+    //     cout << "Recording: Trigger=" << trigger 
+    //  << ", Target=" << target 
+    //  << ", BranchDelta=" << branch_delta_value 
+    //  << ", TargetDelta=" << target_delta_value 
+    //  << ", EntryFormat=" << record[trace_flag][record_iter[trace_flag]].entry_format << endl;
 
-    }
+    // }
 
     record_iter[trace_flag] = (record_iter[trace_flag] + 1) % 5000000;
     record_last_target_address[trace_flag] = target; 
@@ -1098,64 +1106,109 @@ void O3_CPU::record_phase(uint64_t trigger, uint64_t target, uint8_t branch_type
 
 void O3_CPU::replay_phase(uint64_t trigger)
 {
- 
-if(flag == 0){
-    flag = 1;
-}else{
-  if (isBTBflushed[trace_flag] == 0){  
+
+  if(warmup_complete[0] == 0){
     return;
+  } 
+  if (isBTBflushed[trace_flag] == 0) {
+    return;
+    }
+  int mode = 0; // mode = 0 (50% replay rate) and mode = 1 (25% replay rate)
+
+//   cout <<"replay rate: "<<replay_rate[trace_flag] << " " << (replay_iter[trace_flag] + 1) << " " << ((double)replay_rate[trace_flag] / (double)(replay_iter[trace_flag] + 1))
+//        << "\n";
+
+  if (((double)replay_rate[trace_flag] / (double)(replay_iter[trace_flag] + 1)) >= 0.5) {
+    mode = 1;
   }
-//   if (flag != 0) {
-//     // flag--;
-//     flag = 0;
-//   } else {
-   
-    uint64_t target;
-    int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
-    uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
-    int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
-    int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
-    uint64_t IP;
-    if (isIP) {
-      IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
-    //   cout<<"IP == " << IP<<"\n";
-    } else {
-      IP = replay_last_target_address[trace_flag] + branch_delta;
-    }
-    target = IP + target_delta;
-    
-    // cout<<IP<<" "<<target<<endl;
-    cout<<"replay rate for "<<trace_flag<<" "<<replay_rate[trace_flag]<<"\n";
-    fill_btb(IP, target, 1);
-    // cout<<target<<"\n";
-    // if(target > 64){
-    // int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
-    // }else{
-    //     num++;
-    //     if(trace_flag)
-    //     cout<<replay_last_target_address[trace_flag]<<" "<<IP<<" "<<target_delta<<" "<<isIP<<"\n";
-    //     // cout<<branch_delta<<" "<<target_delta<<" "<<IP<<" "<<num<<" "<<trace_flag<<"\n";
-    // }
 
-     if(trace_flag && replay_iter[trace_flag] == 0){
-            cout << "Replaying: IP=" << IP 
-     << ", Target=" << target 
-     << ", BranchDelta=" << branch_delta 
-     << ", TargetDelta=" << target_delta 
-     <<", replay-iter="<< replay_iter[trace_flag]
-     << ", EntryFormat=" << isIP << endl;
-    }
+    if(mode ==0){
+        if (flag[trace_flag] % 4 == 0) {
+            // cout << "Higher rate skipped" << "\n";
+            flag[trace_flag] = (flag[trace_flag] + 1)% 4;
+        } else {
+            // cout << "Higher rate" << "\n";
+            flag[trace_flag] = (flag[trace_flag] + 1) % 4;
+            
+            uint64_t target;
+            int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
+            uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
+            int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
+            int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
+            uint64_t IP;
+            if (isIP) {
+            IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
+            } else {
+            IP = replay_last_target_address[trace_flag] + branch_delta;
+            }
+            target = IP + target_delta;
 
-    // int x  = prefetch_code_line_L2(target);
-    replay_last_target_address[trace_flag] = target;
-    replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 5000000;
-    if (branch_type == 1) {
-      ignite_BIM(IP);
-    }
-    flag = 0;
-    }
+            // cout<<"replay rate for "<<trace_flag<<" "<<replay_rate[trace_flag]<<"\n";
+            fill_btb(IP, target, 1);
+            int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
 
-   
+            //  if(trace_flag && replay_iter[trace_flag] == 0){
+            //         cout << "Replaying: IP=" << IP
+            //  << ", Target=" << target
+            //  << ", BranchDelta=" << branch_delta
+            //  << ", TargetDelta=" << target_delta
+            //  <<", replay-iter="<< replay_iter[trace_flag]
+            //  << ", EntryFormat=" << isIP << endl;
+            // }
+
+            // int x  = prefetch_code_line_L2(target);
+            replay_last_target_address[trace_flag] = target;
+            replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 5000000;
+            if (branch_type == 1) {
+                // ignite_BIM(IP);
+            }
+            // flag[trace_flag] = 0;
+        }
+    }
+    else{
+        if (flag[trace_flag] %10  != 0) {
+            // cout << "Lower rate skipped" << "\n";
+            flag[trace_flag] = (flag[trace_flag] + 1) % 10;
+        } else {
+            // cout << "Lower rate replayed" << "\n";
+            flag[trace_flag] = (flag[trace_flag] + 1) % 10;
+            if (isBTBflushed[trace_flag] == 0) {
+                return;
+            }
+            uint64_t target;
+            int isIP = record[trace_flag][replay_iter[trace_flag]].entry_format;
+            uint8_t branch_type = record[trace_flag][replay_iter[trace_flag]].branch_type;
+            int branch_delta = record[trace_flag][replay_iter[trace_flag]].branch_delta;
+            int target_delta = record[trace_flag][replay_iter[trace_flag]].target_delta;
+            uint64_t IP;
+            if (isIP) {
+            IP = record[trace_flag][replay_iter[trace_flag]].full_addr;
+            } else {
+            IP = replay_last_target_address[trace_flag] + branch_delta;
+            }
+            target = IP + target_delta;
+
+            // cout<<"replay rate for "<<trace_flag<<" "<<replay_rate[trace_flag]<<"\n";
+            fill_btb(IP, target, 1);
+
+            int x = L2C.prefetch_line(trigger, trigger, target, FILL_L2, 0); /*, uint64_t prefetch_id)*/
+        
+            //  if(trace_flag && replay_iter[trace_flag] == 0){
+            //         cout << "Replaying: IP=" << IP
+            //  << ", Target=" << target
+            //  << ", BranchDelta=" << branch_delta
+            //  << ", TargetDelta=" << target_delta
+            //  <<", replay-iter="<< replay_iter[trace_flag]
+            //  << ", EntryFormat=" << isIP << endl;
+            // }
+
+            replay_last_target_address[trace_flag] = target;
+            replay_iter[trace_flag] = (replay_iter[trace_flag] + 1) % 5000000;
+            if (branch_type == 1) {
+            ignite_BIM(IP);
+            }
+        }
+    }
 }
 
 void O3_CPU::fill_btb(uint64_t trigger, uint64_t target, int is_replayed)
@@ -1173,7 +1226,9 @@ void O3_CPU::fill_btb(uint64_t trigger, uint64_t target, int is_replayed)
         if(BTB.block[btb_set][btb_way].bprefetch==1){
             if(replay_rate[trace_flag]>0){
                 replay_rate[trace_flag]--;
-                cout<<"decreased\n";
+                BTB.block[btb_set][btb_way].bprefetch = 2;
+                // if(trace_flag)
+                // cout<<replay_rate[trace_flag]<<" decreased due to btb fill\n";
             }
         }
 		if(entry.valid == 0)
